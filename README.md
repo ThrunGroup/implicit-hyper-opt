@@ -147,12 +147,6 @@ To deploy with Slurm:
 srun ...
 ```
 
-# Write-up
-
-The write-ups associated with the codebase are in `papers/`, formatted with Latex.
-The writeup for NeurIPS is in `papers/nips/`.
-Preliminary experimental write-ups are in `papers/haoping_project`.
-
 
 
 # Project Structure
