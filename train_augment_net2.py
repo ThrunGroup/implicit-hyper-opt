@@ -1,11 +1,15 @@
 import copy
-import os
 import time
 
-import ipdb
 import argparse
-from tqdm import tqdm
 import numpy as np
+from tqdm import tqdm
+
+import pickle
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+from multiprocessing import Pool
+
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -15,18 +19,24 @@ from torch.optim.lr_scheduler import MultiStepLR
 
 # Local imports
 import data_loaders
-from models.unet import UNet
+from data_loaders import load_mnist, load_boston
+from utils.util import gather_flat_grad
+
 from models import resnet_cifar
+from models.unet import UNet
 from models.resnet import ResNet18
 from models.simple_models import Net
 from models.wide_resnet import WideResNet
-from train_augment_net_multiple import get_id
-from utils.util import gather_flat_grad
+from models.simple_models import Net
+from models.simple_models import CNN, Net
+
+from train_augment_net_multiple import load_logger, get_id
+from train_augment_net_graph import save_images
+from train_augment_net_multiple import make_parser, make_argss
 
 
 def saver(epoch, elementary_model, elementary_optimizer, augment_net, reweighting_net, hyper_optimizer, path):
     """
-
     :param epoch:
     :param elementary_model:
     :param elementary_optimizer:
@@ -59,7 +69,6 @@ def saver(epoch, elementary_model, elementary_optimizer, augment_net, reweightin
 
 def load_baseline_model(args):
     """
-
     :param args:
     :return:
     """
@@ -80,14 +89,11 @@ def load_baseline_model(args):
         # num_train = args.train_size
         # if args.train_size == -1:
         num_train = 50000
-
-        from data_loaders import load_mnist
         train_loader, val_loader, test_loader = load_mnist(args.batch_size,
                                                            subset=[args.train_size, args.val_size, args.test_size],
                                                            num_train=num_train, only_split_train=False)
     elif args.dataset == 'boston':
         imsize, in_channel, num_classes = 13, 1, 1
-        from data_loaders import load_boston
         train_loader, val_loader, test_loader = load_boston(args.batch_size)
 
     init_l2 = -7  # TODO: Important to make sure this is small enough to be unregularized when starting?
@@ -96,7 +102,6 @@ def load_baseline_model(args):
     elif args.model == 'wideresnet':
         cnn = WideResNet(depth=28, num_classes=num_classes, widen_factor=10, dropRate=0.3)
     elif args.model[:3] == 'mlp':
-        from models.simple_models import Net
         cnn = Net(args.num_layers, 0.0, imsize, in_channel, init_l2, num_classes=num_classes,
                   do_classification=args.do_classification)
 
@@ -121,7 +126,6 @@ def load_baseline_model(args):
 
 def load_finetuned_model(args, baseline_model):
     """
-
     :param args:
     :param baseline_model:
     :return:
@@ -137,7 +141,6 @@ def load_finetuned_model(args, baseline_model):
     # TODO (JON): DEPTH 1 WORKED WELL.  Changed upconv to upsample.  Use a wf of 2.
 
     # This ResNet outputs scalar weights to be applied element-wise to the per-example losses
-    from models.simple_models import CNN, Net
     reweighting_net = Net(1, 0.0, imsize, in_channel, 0.0, num_classes=1)  # resnet_cifar.resnet20(num_classes=1)
     # resnet_cifar.resnet20(num_classes=1)
 
@@ -162,7 +165,6 @@ def load_finetuned_model(args, baseline_model):
 
 def zero_hypergrad(get_hyper_train):
     """
-
     :param get_hyper_train:
     :return:
     """
@@ -176,7 +178,6 @@ def zero_hypergrad(get_hyper_train):
 
 def store_hypergrad(get_hyper_train, total_d_val_loss_d_lambda):
     """
-
     :param get_hyper_train:
     :param total_d_val_loss_d_lambda:
     :return:
@@ -191,7 +192,6 @@ def store_hypergrad(get_hyper_train, total_d_val_loss_d_lambda):
 def neumann_hyperstep_preconditioner(d_val_loss_d_theta, d_train_loss_d_w, elementary_lr, num_neumann_terms, model):
     preconditioner = d_val_loss_d_theta.detach()
     counter = preconditioner
-
     # Do the fixed point iteration to approximate the vector-inverseHessian product
     i = 0
     while i < num_neumann_terms:  # for i in range(num_neumann_terms):
@@ -208,7 +208,8 @@ def neumann_hyperstep_preconditioner(d_val_loss_d_theta, d_train_loss_d_w, eleme
 
 
 def cg_batch(A_bmm, B, M_bmm=None, X0=None, rtol=1e-4, atol=0.0, maxiter=10, verbose=True):
-    """Solves a batch of PD matrix linear systems using the preconditioned CG algorithm.
+    """
+    Solves a batch of PD matrix linear systems using the preconditioned CG algorithm.
 
     This function solves a batch of matrix linear systems of the form
 
@@ -335,7 +336,6 @@ def get_models(args):
 def experiment(args):
     if args.do_print: print(args)
     do_simple = args.do_simple
-    # Setup the random seeds
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     if torch.cuda.is_available():
@@ -343,11 +343,10 @@ def experiment(args):
 
     # Load the baseline model
     args.load_baseline_checkpoint = None  # '/h/lorraine/PycharmProjects/CG_IFT_test/baseline_checkpoints/cifar10_resnet18_sgdm_lr0.1_wd0.0005_aug1.pt'
-    # args.load_finetune_checkpoint = None  # TODO: Make it load the augment net if this is provided
+    args.load_finetune_checkpoint = None  # TODO: Make it load the augment net if this is provided
     model, train_loader, val_loader, test_loader, augment_net, reweighting_net, checkpoint = get_models(args)
 
     # Load the logger
-    from train_augment_net_multiple import load_logger, get_id
     csv_logger, test_id = load_logger(args)
     args.save_loc = './finetuned_checkpoints/' + get_id(args)
 
@@ -426,7 +425,6 @@ def experiment(args):
             if args.do_diagnostic:
                 nonlocal graph_iter
                 if graph_iter % 100 == 0:
-                    import matplotlib.pyplot as plt
                     np_loss = xentropy_loss.data.cpu().numpy()
                     np_weight = loss_weights.data.cpu().numpy()
                     for i in range(10):
@@ -531,7 +529,8 @@ def experiment(args):
 
     def hyper_step(elementary_lr, do_true_inverse=False):
         # hyper_step(get_hyper_train, model, val_loss_func, val_loader, old_d_train_loss_d_w, elementary_lr, use_reg, args, train_loader, train_loss_func, elementary_optimizer):
-        """Estimate the hypergradient, and take an update with it.
+        """
+        Estimate the hypergradient, and take an update with it.
 
         :param get_hyper_train:  A function which returns the hyperparameters we want to tune.
         :param model:  A function which returns the elementary parameters we want to tune.
@@ -723,14 +722,16 @@ def experiment(args):
                     hyper_num += 1
 
             # Replace the original gradient for the elementary optimizer step.
-            '''current_index = 0
+            '''
+            current_index = 0
             flat_train_grad = gather_flat_grad(train_grad)
             for p in model.parameters():
                 p_num_params = np.prod(p.shape)
                 # if p.grad is not None:
                 p.grad = flat_train_grad[current_index: current_index + p_num_params].view(p.shape)
                 current_index += p_num_params
-            optimizer.step()'''
+            optimizer.step()
+            '''
 
             iteration += 1
 
@@ -754,7 +755,6 @@ def experiment(args):
                 )
             if i % (num_tune_hyper ** 2) == 0:
                 if args.use_augment_net:
-                    from train_augment_net_graph import save_images
                     if args.do_diagnostic:
                         save_images(images, labels, augment_net, args)
                 if not do_simple or args.do_inverse_compare:
@@ -801,7 +801,7 @@ def experiment(args):
 
 
 def make_test_arg():
-    from train_augment_net_multiple import make_parser, make_argss
+
 
     test_args = make_parser().parse_args()  # make_argss()[0]
     test_args.reg_weight = .5
@@ -817,7 +817,6 @@ def make_test_arg():
 
 
 def make_inverse_compare_arg():
-    from train_augment_net_multiple import make_parser, make_argss
 
     test_args = make_parser().parse_args()  # make_argss()[0]
     test_args.reg_weight = 1.0
@@ -843,14 +842,13 @@ def make_inverse_compare_arg():
 
 
 def make_val_size_compare(hyperparam, val_prop, data_size, dataset):
-    from train_augment_net_multiple import make_parser, make_argss
+
 
     test_args = make_parser().parse_args()  # make_argss()[0]
     test_args.reg_weight = 0.0
     # TODO: What am I tuning?
 
     test_args.seed = 9998
-
     test_args.data_augmentation = False
     test_args.batch_size = data_size  # TODO: Do i want a variable batch size?
     assert 0 <= val_prop <= 1.0, 'Train proportion in [0, 1]'
@@ -900,10 +898,6 @@ def make_val_size_compare(hyperparam, val_prop, data_size, dataset):
     return test_args
 
 
-import pickle
-import matplotlib.pyplot as plt
-
-
 def run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets):
     for seed in seeds:
         for dataset in datasets:
@@ -926,7 +920,7 @@ def run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets):
                         second_args = make_val_size_compare(hyperparam, 0, data_size, dataset)
                         second_args.seed = seed
                         second_args.num_neumann_terms = -1
-                        loc = '/h/lorraine/PycharmProjects/CG_IFT_test/finetuned_checkpoints/'
+                        loc = '/sailhome/motiwari/data-augmentation/implicit-hyper-opt/CG_IFT_test/finetuned_checkpoints/'
                         loc += get_id(args) + '/'
                         loc += 'checkpoint.pt'
                         second_args.load_finetune_checkpoint = loc
@@ -953,7 +947,6 @@ def run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets):
 
 def graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, exclude_sizes=[], retrain=False,
                            do_legend=True, fontsize=12):
-    import matplotlib as mpl
     font = {'family': 'Times New Roman'}
     mpl.rc('font', **font)
     mpl.rcParams['legend.fontsize'] = fontsize
@@ -996,6 +989,7 @@ def graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, e
                 hyperlabel = 'Global WD'
                 label += ',Hyper:' + hyperlabel  # + ',Data:' + dataset
             # if seed != seeds[0]: label = None
+
             if data_size != data_sizes[0] and hyperparam != hyperparams[0]: label = None
             plot = plt.errorbar(val_props,
                                 np.mean(data_to_graph, axis=0),
@@ -1057,7 +1051,6 @@ def graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, e
 
 # TODO: Make a function to create multiple args to deploy
 def do_boston(hyperparam, num_layer, num_neumann):
-    from train_augment_net_multiple import make_parser, make_argss
 
     test_args = make_parser().parse_args()  # make_argss()[0]
     test_args.reg_weight = 0.0
@@ -1081,7 +1074,7 @@ def do_boston(hyperparam, num_layer, num_neumann):
         test_args.weight_decay_all = False
         test_args.use_reweighting_net = False
         test_args.use_augment_net = False
-    '''elif hyperparam == 'dataAugment':
+    elif hyperparam == 'dataAugment':
         test_args.use_weight_decay = False
         test_args.weight_decay_all = False
         test_args.use_reweighting_net = False
@@ -1090,14 +1083,14 @@ def do_boston(hyperparam, num_layer, num_neumann):
         test_args.use_weight_decay = False
         test_args.weight_decay_all = False
         test_args.use_reweighting_net = True
-        test_args.use_augment_net = False'''
+        test_args.use_augment_net = False
     test_args.num_layers = num_layer
 
     test_args.dataset = 'boston'
     test_args.do_classification = False
     test_args.do_simple = True
     test_args.do_diagnostic = False
-    test_args.do_print = True  # False
+    test_args.do_print = True
 
     test_args.num_neumann_terms = num_neumann
     test_args.use_cg = False
@@ -1143,17 +1136,7 @@ def multi_boston_how_many_steps():
     return argss
 
 
-'''seeds = [1, 2, 3]
-    hyperparams = ['weightDecayParams', 'weightDecayGlobal']
-    data_sizes = [50, 100, 250, 500, 1000]  # TODO: Generalize to other variables - ex. hyper choice
-    val_props = [.0, .1, .25, .5, .75, .9]'''
-# seeds = [1]  # , 2, 3]
-hyperparams = ['weightDecayParams', 'weightDecayGlobal', 'dataAugment']  # , 'weightDecayGlobal']
-data_sizes = [100, 200, 1600]
-# [100, 200, 400, 800, 1600]  # TODO: Generalize to other variables - ex. hyper choice
-val_props = [.0, .1, .25, .5, .75, .9]  # , 0.5, .75, .9]  # , .25, .5, .75]
-datasets = ['mnist', 'cifar10']  # , 'cifar10']  # 'mnist', 'cifar10'
-from multiprocessing import Pool
+
 
 
 def curried_run_val(seed):
@@ -1165,14 +1148,25 @@ if __name__ == '__main__':
     # experiment(make_inverse_compare_arg())
     # experiment(make_val_size_compare(0.5, 100))
 
-    seeds = [1, 2, 3, 4]
+    '''
+    seeds = [1, 2, 3]
+    hyperparams = ['weightDecayParams', 'weightDecayGlobal']
+    data_sizes = [50, 100, 250, 500, 1000]  # TODO: Generalize to other variables - ex. hyper choice
+    val_props = [.0, .1, .25, .5, .75, .9]
+    '''
+
     # curried_run_val(seeds[0])
     # p = Pool(len(seeds))
     # p.map(curried_run_val, seeds)
+
+    #List of 'dataAugment', 'weightDecayParams', and/or 'weightDecayGlobal'
+    seeds = [1]
+    hyperparams = ['dataAugment']
+    data_sizes = [100, 200, 1600] # TODO: Generalize to other variables - ex. hyper choice
+    val_props = [.0, .1, .25, .5, .75, .9]
+    datasets = ['mnist']
+
     # run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets)
-    hyperparams = ['weightDecayGlobal',
-                   'weightDecayParams'
-                   ]  # 'dataAugment']  # , 'dataAugment', 'weightDecayParams', 'weightDecayGlobal']
 
     for dataset in datasets:
         exclude_sizes = []  # 50]
@@ -1182,7 +1176,8 @@ if __name__ == '__main__':
         graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, exclude_sizes=exclude_sizes,
                                retrain=True, do_legend=True, fontsize=fontsize)
 
-    '''# TODO: THE TRICK IS TO TRIAN FOR A LOT OF ITERATIONS!!!
+    '''
+    # TODO: THE TRICK IS TO TRIAN FOR A LOT OF ITERATIONS!!!
     inverse_argss = multi_boston_args()
     #inverse_argss = multi_boston_how_many_steps()
     for args in inverse_argss:
@@ -1191,4 +1186,5 @@ if __name__ == '__main__':
     # inverse_argss = multi_boston_args()
     inverse_argss = multi_boston_how_many_steps()
     for args in inverse_argss:
-        experiment(args)'''
+        experiment(args)
+    '''
