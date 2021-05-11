@@ -36,11 +36,11 @@ python mnist_test.py
   --jacobian<direct: true jacobian; product: use d_L/d_theta * d_L/d_lambda>
 ```
 
-Trained models after each hyperparameter update will be stored in folder difined in line 627 in mnist_test.py
+Trained models after each hyperparameter update will be stored in folder defined in line 627 in `mnist_test.py`.
 To use CG to compute inverse of hessian, change line 660's hyperparameter updator.
 
 ```bash
-python mnist_test.py --datasize 40000 --valsize 10000 --lrh 0.01 --epochs=100 --hepochs=10 --l2=1e-5 --restart=10 --model=mlp --dataset=mnist --num_layers=1 --hessian=kfac --jacobian=direct
+python mnist_test.py --datasize 40000 --valsize 10000 --lrh 0.01 --epochs=100 --hepochs=10 --l2=1e-5 --restart=10 --model=mlp --dataset=MNIST --num_layers=1 --hessian=KFAC --jacobian=direct
 ```
 
 ## Deployment

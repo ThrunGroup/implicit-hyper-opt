@@ -49,17 +49,17 @@ def load_mnist(batch_size, val_split=True, subset=[-1, -1, -1], num_train=50000,
         # Train set
         original_trainset = datasets.MNIST(root='./data/mnist', train=True, download=True, transform=transform)
         trainset = original_trainset
-        trainset.train_data = trainset.train_data[:num_train, :, :]
-        trainset.train_labels = trainset.train_labels[:num_train]
+        trainset.data = trainset.train_data[:num_train, :, :]
+        trainset.labels = trainset.train_labels[:num_train]
 
         # Validation set
         valset = datasets.MNIST(root='./data/mnist', train=True, download=True, transform=transform)
-        valset.train_data = valset.train_data[num_train:, :, :]
-        valset.train_labels = valset.train_labels[num_train:]
+        valset.data = valset.train_data[num_train:, :, :]
+        valset.labels = valset.train_labels[num_train:]
 
         # Test set
         testset = datasets.MNIST(root='./data/mnist', train=False, download=True, transform=transform)
-        testset.test_data = testset.test_data
+        testset.data = testset.test_data
 
         if only_split_train:
             rand_ind = np.random.randint(0, high=len(original_trainset) - 1, size=subset[0] + subset[1])
@@ -110,12 +110,12 @@ def load_fashion_mnist(batch_size, val_split=True, subset=[-1, -1, -1]):
         num_train = 50000  # Will split training set into 50,000 training and 10,000 validation images
         # Train set
         trainset = datasets.FashionMNIST(root='./data/fashion', train=True, download=True, transform=transform)
-        trainset.train_data = trainset.train_data[:num_train, :, :]
-        trainset.train_labels = trainset.train_labels[:num_train]
+        trainset.data = trainset.train_data[:num_train, :, :]
+        trainset.labels = trainset.train_labels[:num_train]
         # Validation set
         valset = datasets.FashionMNIST(root='./data/fashion', train=True, download=True, transform=transform)
-        valset.train_data = valset.train_data[num_train:, :, :]
-        valset.train_labels = valset.train_labels[num_train:]
+        valset.data = valset.train_data[num_train:, :, :]
+        valset.labels = valset.train_labels[num_train:]
         # Test set
         testset = datasets.FashionMNIST(root='./data/fashion', train=False, download=True, transform=transform)
 
@@ -172,12 +172,12 @@ def load_cifar10(batch_size, num_train=45000, val_split=True, augmentation=False
         original_trainset = datasets.CIFAR10(root='./data/cifar10', train=True, download=True,
                                              transform=train_transform)
         trainset = original_trainset
-        trainset.train_data = trainset.train_data[:num_train, :, :, :]
-        trainset.train_labels = trainset.train_labels[:num_train]
+        trainset.data = trainset.train_data[:num_train, :, :, :]
+        trainset.labels = trainset.train_labels[:num_train]
         # Validation set
         valset = datasets.CIFAR10(root='./data/cifar10', train=True, download=True, transform=test_transform)
-        valset.train_data = valset.train_data[num_train:, :, :, :]
-        valset.train_labels = valset.train_labels[num_train:]
+        valset.data = valset.train_data[num_train:, :, :, :]
+        valset.labels = valset.train_labels[num_train:]
         # Test set
         testset = datasets.CIFAR10(root='./data/cifar10', train=False, download=True, transform=test_transform)
 
@@ -244,12 +244,12 @@ def load_cifar100(batch_size, num_train=45000, val_split=True, augmentation=Fals
     if val_split:
         # Train set
         trainset = datasets.CIFAR100(root='./data/cifar100', train=True, download=True, transform=train_transform)
-        trainset.train_data = trainset.train_data[:num_train, :, :, :]
-        trainset.train_labels = trainset.train_labels[:num_train]
+        trainset.data = trainset.train_data[:num_train, :, :, :]
+        trainset.labels = trainset.train_labels[:num_train]
         # Validation set
         valset = datasets.CIFAR100(root='./data/cifar100', train=True, download=True, transform=test_transform)
-        valset.train_data = valset.train_data[num_train:, :, :, :]
-        valset.train_labels = valset.train_labels[num_train:]
+        valset.data = valset.train_data[num_train:, :, :, :]
+        valset.labels = valset.train_labels[num_train:]
         # Test set
         testset = datasets.CIFAR100(root='./data/cifar100', train=False, download=True, transform=test_transform)
 

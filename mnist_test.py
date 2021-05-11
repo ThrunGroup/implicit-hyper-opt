@@ -988,7 +988,7 @@ if __name__ == '__main__':
     def setup_inversion_comparison_large():
         # Launch a process for each args
         model = 'resnet'
-        dataset = 'CIFAR10'
+        dataset = 'MNIST'
         args_KFAC = setup_overfit_validation(dataset, model, 0)
         args_KFAC.hessian = 'KFAC'
 
@@ -1037,13 +1037,13 @@ if __name__ == '__main__':
         args_MNIST = setup_learn_images('MNIST', 10)
         args_CIFAR10 = setup_learn_images('CIFAR10', 10)
         args_CIFAR100 = setup_learn_images('CIFAR100', 100)
-        return [args_CIFAR10]  # [args_MNIST, args_CIFAR10, args_CIFAR100]
+        return [args_MNIST]  # [args_MNIST, args_CIFAR10, args_CIFAR100]
 
 
     def setup_overfit_images():
         argss = []
         # TODO: Try other optimizers! Ex. Adam?
-        for dataset in ['CIFAR10']:  #'MNIST', 'CIFAR10']:  # 'MNIST',
+        for dataset in ['MNIST']:  #'MNIST', 'CIFAR10']:  # 'MNIST',
             for model in ['alexnet']:  #'mlp', 'alexnet', 'resnet']:  # 'mlp', 'cnn',
                 layer_selection = [0]
                 if model == 'mlp':
@@ -1100,7 +1100,6 @@ if __name__ == '__main__':
     super_execute_argss = setup_overfit_images()
     # TODO (JON): I put different elementary optimizer and inverter
     do_multiprocess = False
-
     if do_multiprocess:
         p = Pool(min(4, len(super_execute_argss)))  # Set this to whatever the GPU can handle
         p.map(experiment, super_execute_argss)
