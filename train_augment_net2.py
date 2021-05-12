@@ -20,6 +20,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 # Local imports
 import data_loaders
 from data_loaders import load_mnist, load_boston
+from models.cnn_mlp import CNN_MLP
 from utils.util import gather_flat_grad
 
 from models import resnet_cifar
@@ -107,6 +108,8 @@ def load_baseline_model(args):
     elif args.model[:3] == 'mlp':
         cnn = Net(args.num_layers, 0.0, imsize, in_channel, init_l2, num_classes=num_classes,
                   do_classification=args.do_classification)
+    elif args.model == 'cnn_mlp':
+        cnn = CNN_MLP(learning_rate=0.0001)
 
     checkpoint = None
     if args.load_baseline_checkpoint:
@@ -873,7 +876,7 @@ def make_val_size_compare(hyperparam, val_prop, data_size, dataset):
     # TODO: For long running, boost test_size and num_epochs
     test_args.test_size = -1
     test_args.num_finetune_epochs = 250
-    test_args.model = 'mlp'  # 'resnet18', 'mlp'
+    test_args.model = 'cnn_mlp'  # 'resnet18', 'mlp'
 
     if hyperparam == 'weightDecayParams':
         test_args.use_weight_decay = True
@@ -1174,7 +1177,7 @@ if __name__ == '__main__':
     val_props = [.0, .1, .25, .5, .75, .9]
     datasets = ['mnist']
 
-    # run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets)
+    run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets)
 
     for dataset in datasets:
         exclude_sizes = []  # 50]

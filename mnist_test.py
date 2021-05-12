@@ -876,7 +876,7 @@ if __name__ == '__main__':
                         help='dropout rate on input')
 
     # Architectural hyperparameters
-    parser.add_argument('--model', type=str, default="mlp", choices=['mlp', 'cnn', 'alexnet', 'resnet', 'pretrained'],
+    parser.add_argument('--model', type=str, default="mlp", choices=['mlp', 'cnn', 'alexnet', 'resnet', 'pretrained', ],
                         help='which model to train')
     parser.add_argument('--num_layers', type=int, default=0,
                         help='number of layers in network')

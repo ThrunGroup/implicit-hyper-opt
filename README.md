@@ -15,6 +15,11 @@ conda install pytorch torchvision cudatoolkit=9.0 -c pytorch
 pip install -r requirements.txt
 ```
 
+Install Jupyter lab:
+```bash
+conda install -c conda-forge jupyterlab
+```
+
 ## Simple test
 
 Consider the following tests to verify the environment is correctly setup:
