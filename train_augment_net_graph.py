@@ -9,7 +9,6 @@ import matplotlib as mpl
 
 def save_learned(datas, is_mnist, batch_size, name, path='images'):
     """
-
     :param datas:
     :param is_mnist:
     :param batch_size:
@@ -46,7 +45,6 @@ def save_learned(datas, is_mnist, batch_size, name, path='images'):
 
 def save_images(images, labels, augment_net, args):
     """
-
     :param images:
     :param labels:
     :param augment_net:
@@ -82,7 +80,6 @@ def save_images(images, labels, augment_net, args):
 
 def graph_single_args(args, save_loc=None):
     """
-
     :param args:
     :return:
     """
@@ -109,7 +106,6 @@ def graph_single_args(args, save_loc=None):
 
 def init_ax(fontsize=24, nrows=1, ncols=1):
     """
-
     :param fontsize:
     :return:
     """
@@ -134,7 +130,6 @@ def init_ax(fontsize=24, nrows=1, ncols=1):
 
 def setup_ax(ax, do_legend=True, alpha=0.0, fontsize=24, legend_loc=None, handlelength=None):
     """
-
     :param ax:
     :param do_legend:
     :param alpha:
@@ -154,7 +149,6 @@ def setup_ax(ax, do_legend=True, alpha=0.0, fontsize=24, legend_loc=None, handle
 
 def load_from_csv(path, do_train=True, do_val=False, do_test=False):
     """
-
     :param path:
     :param do_train:
     :param do_val:

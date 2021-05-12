@@ -6,7 +6,6 @@ from utils.csv_logger import CSVLogger
 
 def make_parser():
     """
-
     :return:
     """
     parser = argparse.ArgumentParser(description='CNN Hyperparameter Fine-tuning')
@@ -60,7 +59,6 @@ def make_parser():
 
 def get_id(args):
     """
-
     :param args:
     :return:
     """
@@ -79,7 +77,6 @@ def get_id(args):
 
 def load_logger(args):
     """
-
     :param args:
     :return:
     """
@@ -104,7 +101,6 @@ def load_logger(args):
 
 def make_argss():
     """
-
     :return:
     """
     parser = make_parser()
@@ -144,7 +140,6 @@ def make_argss():
 
 def deploy_make_argss():
     """
-
     :return:
     """
     argss = make_argss()

@@ -37,6 +37,8 @@ from train_augment_net_multiple import make_parser, make_argss
 
 def saver(epoch, elementary_model, elementary_optimizer, augment_net, reweighting_net, hyper_optimizer, path):
     """
+    Saves torch models
+
     :param epoch:
     :param elementary_model:
     :param elementary_optimizer:
@@ -69,6 +71,9 @@ def saver(epoch, elementary_model, elementary_optimizer, augment_net, reweightin
 
 def load_baseline_model(args):
     """
+    Load a simple baseline model AND dataset
+    Note that this sets the model to training mode
+
     :param args:
     :return:
     """
@@ -86,8 +91,6 @@ def load_baseline_model(args):
                                                                                    args.test_size])
     elif args.dataset == 'mnist':
         imsize, in_channel, num_classes = 28, 1, 10
-        # num_train = args.train_size
-        # if args.train_size == -1:
         num_train = 50000
         train_loader, val_loader, test_loader = load_mnist(args.batch_size,
                                                            subset=[args.train_size, args.val_size, args.test_size],
@@ -126,6 +129,9 @@ def load_baseline_model(args):
 
 def load_finetuned_model(args, baseline_model):
     """
+    Loads the augmentation net, sample reweighting net, and baseline model
+    Note: sets all these models to train mode
+
     :param args:
     :param baseline_model:
     :return:
@@ -135,13 +141,14 @@ def load_finetuned_model(args, baseline_model):
         imsize, in_channel, num_classes = 28, 1, 10
     else:
         imsize, in_channel, num_classes = 32, 3, 10
+
     augment_net = UNet(in_channels=in_channel, n_classes=in_channel, depth=2, wf=3, padding=True, batch_norm=False,
                        do_noise_channel=True,
                        up_mode='upconv', use_identity_residual=True)  # TODO(PV): Initialize UNet properly
     # TODO (JON): DEPTH 1 WORKED WELL.  Changed upconv to upsample.  Use a wf of 2.
 
     # This ResNet outputs scalar weights to be applied element-wise to the per-example losses
-    reweighting_net = Net(1, 0.0, imsize, in_channel, 0.0, num_classes=1)  # resnet_cifar.resnet20(num_classes=1)
+    reweighting_net = Net(1, 0.0, imsize, in_channel, 0.0, num_classes=1)
     # resnet_cifar.resnet20(num_classes=1)
 
     if args.load_finetune_checkpoint:
@@ -172,12 +179,14 @@ def zero_hypergrad(get_hyper_train):
     for p in get_hyper_train():
         p_num_params = np.prod(p.shape)
         if p.grad is not None:
-            p.grad = p.grad * 0
+            p.grad = p.grad * 0 # TODO (@Mo): Is this necessary? Could just set to 0?
         current_index += p_num_params
 
 
 def store_hypergrad(get_hyper_train, total_d_val_loss_d_lambda):
     """
+    Updates the hypergradients and the number of hyperparameters?
+
     :param get_hyper_train:
     :param total_d_val_loss_d_lambda:
     :return:
@@ -193,17 +202,13 @@ def neumann_hyperstep_preconditioner(d_val_loss_d_theta, d_train_loss_d_w, eleme
     preconditioner = d_val_loss_d_theta.detach()
     counter = preconditioner
     # Do the fixed point iteration to approximate the vector-inverseHessian product
-    i = 0
-    while i < num_neumann_terms:  # for i in range(num_neumann_terms):
+    for i in range(num_neumann_terms):
         old_counter = counter
-
         # This increments counter to counter * (I - hessian) = counter - counter * hessian
         hessian_term = gather_flat_grad(
             grad(d_train_loss_d_w, model.parameters(), grad_outputs=counter.view(-1), retain_graph=True))
         counter = old_counter - elementary_lr * hessian_term
-
         preconditioner = preconditioner + counter
-        i += 1
     return elementary_lr * preconditioner
 
 
@@ -269,7 +274,6 @@ def cg_batch(A_bmm, B, M_bmm=None, X0=None, rtol=1e-4, atol=0.0, maxiter=10, ver
     epsilon = 1e-2
     for k in range(1, maxiter + 1):
         # epsilon = cur_error ** 3  # 1e-8
-
         start_iter = time.perf_counter()
         Z_k = M_bmm(R_k)
 
@@ -328,14 +332,18 @@ def cg_batch(A_bmm, B, M_bmm=None, X0=None, rtol=1e-4, atol=0.0, maxiter=10, ver
 
 
 def get_models(args):
+    '''
+    Loads both the baseline model and the finetuning models in train mode
+    '''
     model, train_loader, val_loader, test_loader, checkpoint = load_baseline_model(args)
     augment_net, reweighting_net, model = load_finetuned_model(args, model)
     return model, train_loader, val_loader, test_loader, augment_net, reweighting_net, checkpoint
 
 
 def experiment(args):
-    if args.do_print: print(args)
-    do_simple = args.do_simple
+    if args.do_print:
+        print(args)
+
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     if torch.cuda.is_available():
@@ -376,25 +384,22 @@ def experiment(args):
     # Setup the optimizers
     if args.load_baseline_checkpoint is not None:
         args.lr = args.lr * 0.2 * 0.2 * 0.2
-    # if args.use_weight_decay:
-    #    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    # else:
     if args.use_weight_decay:
+        # optimizer = optim.Adam(model.parameters(), lr=1e-3)
         args.wdecay = 0
 
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, nesterov=True, weight_decay=args.wdecay)
     if args.dataset == 'boston':
         optimizer = optim.Adam(model.parameters())
-        # optim.Adam(model.parameters())
     use_scheduler = False
-    if not do_simple:
+    if not args.do_simple:
         use_scheduler = True
     scheduler = MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)  # [60, 120, 160]
     # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     use_hyper_scheduler = False
     hyper_optimizer = optim.RMSprop(get_hyper_train())
-    if not do_simple:
+    if not args.do_simple:
         hyper_optimizer = optim.SGD(get_hyper_train(), lr=args.lr, momentum=0.9, nesterov=True)
         use_hyper_scheduler = True
     hyper_scheduler = MultiStepLR(hyper_optimizer, milestones=[40, 100, 140], gamma=0.2)
@@ -499,7 +504,6 @@ def experiment(args):
         losses = []
         for images, labels in loader:
             images, labels = images.cuda(), labels.cuda()
-
             with torch.no_grad():
                 pred = model(images)
                 if do_test_augment:
@@ -544,14 +548,14 @@ def experiment(args):
         num_weights, num_hypers = sum(p.numel() for p in model.parameters()), sum(p.numel() for p in get_hyper_train())
         print(f"num_weights : {num_weights}, num_hypers : {num_hypers}")
 
-        # d_train_loss_d_w = gather_flat_grad(d_train_loss_d_w)  # TODO: COmmented this out!
+        # d_train_loss_d_w = gather_flat_grad(d_train_loss_d_w)  # TODO: Commented this out!
         d_train_loss_d_w = torch.zeros(num_weights).cuda()
         model.train(), model.zero_grad()
         for batch_idx, (x, y) in enumerate(train_loader):
             train_loss, _ = train_loss_func(x, y)
             optimizer.zero_grad()
             d_train_loss_d_w += gather_flat_grad(grad(train_loss, model.parameters(), create_graph=True))
-            break
+            break # TODO (@Mo): Huh?
         optimizer.zero_grad()
 
         # Compute gradients of the validation loss w.r.t. the weights/hypers
@@ -564,7 +568,7 @@ def experiment(args):
             if use_reg:
                 direct_grad += gather_flat_grad(grad(val_loss, get_hyper_train(), allow_unused=True))
                 direct_grad[direct_grad != direct_grad] = 0
-            break
+            break # TODO (@Mo): Huh?
 
         # Initialize the preconditioner and counter
         preconditioner = d_val_loss_d_theta
@@ -574,11 +578,13 @@ def experiment(args):
                 hess_row = gather_flat_grad(grad(d_train_loss_d_w[i], model.parameters(), retain_graph=True))
                 hessian[i] = hess_row
                 # hessian[-i] = hess_row
-            '''hessian = hessian.t()
+            '''
+            hessian = hessian.t()
             final_hessian = torch.zeros(num_weights, num_weights).cuda()
             for i in range(num_weights):
                 final_hessian[-i] = hessian[i]
-            hessian = final_hessian'''
+            hessian = final_hessian
+            '''
             # hessian = hessian  #hessian @ hessian
             # chol = torch.cholesky(hessian.view(1, num_weights, num_weights))[0] + 1e-3*torch.eye(num_weights).cuda()
             inv_hessian = torch.pinverse(hessian)
@@ -621,12 +627,14 @@ def experiment(args):
                 fig.savefig('images/hessian_' + str(name) + '.pdf')
                 plt.close(fig)
 
-            '''if do_true_inverse:
+            '''
+            if do_true_inverse:
                 name = 'true_inv'
             elif args.use_cg:
                 name = 'cg'
             else:
-                name = 'neumann_' + str(args.num_neumann_terms)'''
+                name = 'neumann_' + str(args.num_neumann_terms)
+            '''
 
             save_hessian(inv_hessian, name='true_inv')
             new_hessian = torch.zeros(inv_hessian.shape).cuda()
@@ -678,7 +686,7 @@ def experiment(args):
         else:
             progress_bar = train_loader
         num_tune_hyper = 45000 / 5000  # 1/5th the val data as train data
-        if do_simple:
+        if args.do_simple:
             num_tune_hyper = 1
         hyper_num = 0
         for i, (images, labels) in enumerate(progress_bar):
@@ -757,8 +765,8 @@ def experiment(args):
                 if args.use_augment_net:
                     if args.do_diagnostic:
                         save_images(images, labels, augment_net, args)
-                if not do_simple or args.do_inverse_compare:
-                    if not do_simple:
+                if not args.do_simple or args.do_inverse_compare:
+                    if not args.do_simple:
                         saver(epoch, model, optimizer, augment_net, reweighting_net, hyper_optimizer, args.save_loc)
                     val_loss, val_acc = test(val_loader)
                     csv_logger.writerow({'epoch': str(epoch),
@@ -775,8 +783,7 @@ def experiment(args):
             hyper_scheduler.step(epoch)
         train_loss = xentropy_loss_avg / (i + 1)
 
-        only_print_final_vals = do_simple
-        if not only_print_final_vals:
+        if not args.only_print_final_vals:
             val_loss, val_acc = test(val_loader)
             # if val_acc >= 0.99 and accuracy >= 0.99 and epoch >= 50: break
             test_loss, test_acc = test(test_loader)
@@ -801,7 +808,9 @@ def experiment(args):
 
 
 def make_test_arg():
-
+    '''
+    Instantiates a set of arguments for a test experiment
+    '''
 
     test_args = make_parser().parse_args()  # make_argss()[0]
     test_args.reg_weight = .5
@@ -817,7 +826,6 @@ def make_test_arg():
 
 
 def make_inverse_compare_arg():
-
     test_args = make_parser().parse_args()  # make_argss()[0]
     test_args.reg_weight = 1.0
     # TODO: What am I tuning?
@@ -842,7 +850,9 @@ def make_inverse_compare_arg():
 
 
 def make_val_size_compare(hyperparam, val_prop, data_size, dataset):
-
+    '''
+    Not sure
+    '''
 
     test_args = make_parser().parse_args()  # make_argss()[0]
     test_args.reg_weight = 0.0
@@ -899,6 +909,7 @@ def make_val_size_compare(hyperparam, val_prop, data_size, dataset):
 
 
 def run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets):
+    # TODO (@Mo): Use itertools' product
     for seed in seeds:
         for dataset in datasets:
             for hyperparam in hyperparams:
@@ -1134,9 +1145,6 @@ def multi_boston_how_many_steps():
                 cg_args.use_cg = True
                 argss += [cg_args]
     return argss
-
-
-
 
 
 def curried_run_val(seed):
