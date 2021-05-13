@@ -389,7 +389,7 @@ class AugmentNetTrainer(object):
 
         # Load the baseline model
         args.load_baseline_checkpoint = None  # '/h/lorraine/PycharmProjects/CG_IFT_test/baseline_checkpoints/cifar10_resnet18_sgdm_lr0.1_wd0.0005_aug1.pt'
-        args.load_finetune_checkpoint = None  # TODO: Make it load the augment net if this is provided
+        args.load_finetune_checkpoint = ''  # TODO: Make it load the augment net if this is provided
         model, train_loader, val_loader, test_loader, augment_net, reweighting_net, checkpoint = self.get_models(args)
 
         # Load the logger
@@ -920,7 +920,7 @@ class AugmentNetTrainer(object):
             'reg_weight': 0.0,
             'seed': 1,
             'data_augmentation': False,
-            'batch_size': 100,    # TODO: Do i want a variable batch size?
+            'batch_size': data_size,    # TODO: Do i want a variable batch size?
             'val_prop': val_prop,
             'train_size': train_size,
             'val_size': val_size,
@@ -931,14 +931,14 @@ class AugmentNetTrainer(object):
             'weight_decay_all': weight_decay_all,
             'use_reweighting_net': use_reweighting_net,
             'use_augment_net': use_augment_net,
-            'dataset': 'mnist',#          'mnist', 'cifar10'  # TODO: Need to add dataset to the save info?
+            'dataset': dataset,         # 'mnist', 'cifar10'  # TODO: Need to add dataset to the save info?
             'do_simple': True,
             'do_diagnostic': False,
             'do_print': False,
             'num_neumann_terms': -1 if val_size == 1 else 3,
             'use_cg': False,
             'only_print_final_vals': False,
-            'load_checkpoint': '',
+            'load_finetune_checkpoint': '',
 
         })
         return test_args
