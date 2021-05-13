@@ -21,6 +21,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 # Local imports
 import data_loaders
 from data_loaders import load_mnist, load_boston
+from finetune_hyperparameters import FinetuneHyperparameters
 from models.cnn_mlp import CNN_MLP
 from utils.util import gather_flat_grad
 
@@ -34,7 +35,7 @@ from models.simple_models import CNN, Net
 
 from train_augment_net_multiple import load_logger, get_id
 from train_augment_net_graph import save_images
-from train_augment_net_multiple import make_parser, make_argss
+from train_augment_net_multiple import make_argss
 
 
 class AugmentNetTrainer(object):
@@ -847,40 +848,41 @@ class AugmentNetTrainer(object):
         Instantiates a set of arguments for a test experiment
         '''
 
-        test_args = make_parser().parse_args()  # make_argss()[0]
-        test_args.reg_weight = .5
-        test_args.num_neumann_terms = 1
-        test_args.use_cg = False
-        test_args.seed = 3333
-        test_args.do_diagnostic = True
-        test_args.data_augmentation = True
-        test_args.use_reweighting_net = False
-        test_args.use_augment_net = True
-        test_args.use_weight_decay = False
+        test_args = FinetuneHyperparameters()
+        test_args.update_hyperparameters({
+            'reg_weight': .5,
+            'num_neumann_terms': 1,
+            'use_cg': False,
+            'seed': 3333,
+            'do_diagnostic': True,
+            'data_augmentation': True,
+            'use_reweighting_net': False,
+            'use_augment_net': True,
+            'use_weight_decay': False
+        })
         return test_args
 
 
     def make_inverse_compare_arg(self):
-        test_args = make_parser().parse_args()  # make_argss()[0]
-        test_args.reg_weight = 1.0
-        # TODO: What am I tuning?
-
-        test_args.seed = 8888
-        test_args.do_diagnostic = True
-        test_args.data_augmentation = True
-        test_args.use_reweighting_net = False
-        test_args.use_augment_net = True
-
-        test_args.batch_size = 50
-        test_args.train_size, test_args.val_size, test_args.test_size = test_args.batch_size, 1000, 100
-
-        test_args.num_finetune_epochs = 10000
-        test_args.model = 'resnet18'  # 'resnet18', 'mlp'
-        test_args.use_weight_decay = False  # TODO: Add weight_decay to saveinfo?
-        test_args.dataset = 'mnist'  # 'mnist', 'cifar10'  # TODO: Need to add dataset to the save info?
-
-        test_args.num_neumann_terms = -1
-        test_args.use_cg = False
+        test_args = FinetuneHyperparameters()
+        test_args.update_hyperparameters({
+            'reg_weight': 1.0,
+            'seed': 8888,
+            'do_diagnostic': True,
+            'data_augmentation': True,
+            'use_reweighting_net': False,
+            'use_augment_net': True,
+            'batch_size': 50,
+            'train_size': 50,
+            'val_size': 1000,
+            'test_size': 100,
+            'num_finetune_epochs': 10000,
+            'model': 'resnet18',            # 'resnet18', 'mlp'
+            'use_weight_decay': False,      # TODO: Add weight_decay to saveinfo?
+            'dataset': 'mnist',             # 'mnist', 'cifar10'  # TODO: Need to add dataset to the save info?
+            'num_neumann_terms': -1,
+            'use_cg': False
+        })
         return test_args
 
 
@@ -888,58 +890,51 @@ class AugmentNetTrainer(object):
         '''
         Not sure
         '''
-
-        test_args = make_parser().parse_args()  # make_argss()[0]
-        test_args.reg_weight = 0.0
-        # TODO: What am I tuning?
-
-        test_args.seed = 9998
-        test_args.data_augmentation = False
-        test_args.batch_size = data_size  # TODO: Do i want a variable batch size?
         assert 0 <= val_prop <= 1.0, 'Train proportion in [0, 1]'
-        test_args.val_prop = val_prop
-        test_args.train_size = int(data_size * (1.0 - test_args.val_prop))
-        test_args.val_size = int(data_size * (test_args.val_prop))
-        if test_args.val_size <= 0:
-            test_args.val_size = 1
-        if test_args.train_size <= 0:
-            test_args.train_size = 1
 
-        # TODO: For long running, boost test_size and num_epochs
-        test_args.test_size = -1
-        test_args.num_finetune_epochs = 250
-        test_args.model = model
+        train_size = int(data_size * (1.0 - val_prop))
+        train_size = 1 if train_size <= 0 else train_size
+        val_size = int(data_size * val_prop)
+        val_size = 1 if val_size <= 0 else val_size
+
+        use_weight_decay = False
+        weight_decay_all = False
+        use_reweighting_net = False
+        use_augment_net = False
 
         if hyperparam == 'weightDecayParams':
-            test_args.use_weight_decay = True
-            test_args.weight_decay_all = True
-            test_args.use_reweighting_net = False
-            test_args.use_augment_net = False
+            use_weight_decay = True
+            weight_decay_all = True
         elif hyperparam == 'weightDecayGlobal':
-            test_args.use_weight_decay = True
-            test_args.weight_decay_all = False
-            test_args.use_reweighting_net = False
-            test_args.use_augment_net = False
+            use_weight_decay = True
         elif hyperparam == 'dataAugment':
-            test_args.use_weight_decay = False
-            test_args.weight_decay_all = False
-            test_args.use_reweighting_net = False
-            test_args.use_augment_net = True
+            use_augment_net = True
         elif hyperparam == 'lossReweight':
-            test_args.use_weight_decay = False
-            test_args.weight_decay_all = False
-            test_args.use_reweighting_net = True
-            test_args.use_augment_net = False
+            use_reweighting_net = True
 
-        test_args.dataset = dataset  # 'mnist', 'cifar10'  # TODO: Need to add dataset to the save info?
-        test_args.do_simple = True
-        test_args.do_diagnostic = False
-        test_args.do_print = False
-
-        test_args.num_neumann_terms = 0
-        if test_args.val_size == 1:
-            test_args.num_neumann_terms = -1
-        test_args.use_cg = False
+        test_args = FinetuneHyperparameters()
+        test_args.update_hyperparameters({
+            'reg_weight': 0.0,
+            'seed': 9998,
+            'data_augmentation': False,
+            'batch_size': data_size,    # TODO: Do i want a variable batch size?
+            'val_prop': val_prop,
+            'train_size': train_size,
+            'val_size': val_size,
+            'test_size': -1,            # TODO: For long running, boost test_size and num_epochs
+            'num_finetune_epochs': 250,
+            'model': model,
+            'use_weight_decay': use_weight_decay,
+            'weight_decay_all': weight_decay_all,
+            'use_reweighting_net': use_reweighting_net,
+            'use_augment_net': use_augment_net,
+            'dataset': dataset,         # 'mnist', 'cifar10'  # TODO: Need to add dataset to the save info?
+            'do_simple': True,
+            'do_diagnostic': False,
+            'do_print': False,
+            'num_neumann_terms': -1 if val_size == 1 else 0,
+            'use_cg': False
+        })
         return test_args
 
 
@@ -1094,54 +1089,45 @@ class AugmentNetTrainer(object):
 
     # TODO: Make a function to create multiple args to deploy
     def do_boston(self, hyperparam, num_layer, num_neumann):
-
-        test_args = make_parser().parse_args()  # make_argss()[0]
-        test_args.reg_weight = 0.0
-        # TODO: What am I tuning?
-
-        test_args.seed = 1
-
-        test_args.data_augmentation = False
-        test_args.batch_size = 128 * 4
-
-        test_args.model = 'mlp'  # 'resnet18', 'mlp'
-        test_args.model += str(num_layer)
+        use_weight_decay = False
+        weight_decay_all = False
+        use_reweighting_net = False
+        use_augment_net = False
 
         if hyperparam == 'weightDecayParams':
-            test_args.use_weight_decay = True
-            test_args.weight_decay_all = True
-            test_args.use_reweighting_net = False
-            test_args.use_augment_net = False
+            use_weight_decay = True
+            weight_decay_all = True
         elif hyperparam == 'weightDecayGlobal':
-            test_args.use_weight_decay = True
-            test_args.weight_decay_all = False
-            test_args.use_reweighting_net = False
-            test_args.use_augment_net = False
+            use_weight_decay = True
         elif hyperparam == 'dataAugment':
-            test_args.use_weight_decay = False
-            test_args.weight_decay_all = False
-            test_args.use_reweighting_net = False
-            test_args.use_augment_net = True
+            use_augment_net = True
         elif hyperparam == 'lossReweight':
-            test_args.use_weight_decay = False
-            test_args.weight_decay_all = False
-            test_args.use_reweighting_net = True
-            test_args.use_augment_net = False
-        test_args.num_layers = num_layer
+            use_reweighting_net = True
 
-        test_args.dataset = 'boston'
-        test_args.do_classification = False
-        test_args.do_simple = True
-        test_args.do_diagnostic = False
-        test_args.do_print = True
-
-        test_args.num_neumann_terms = num_neumann
-        test_args.use_cg = False
-
-        test_args.warmup_epochs = 200
-        test_args.num_finetune_epochs = test_args.warmup_epochs + 400
-        test_args.do_inverse_compare = True
-        test_args.save_hessian = False
+        test_args = FinetuneHyperparameters()
+        test_args.update_hyperparameters({
+            'reg_weight': 0.0,
+            'seed': 1,
+            'data_augmentation': False,
+            'batch_size': 128 * 4,
+            'model': 'mlp' + str(num_layer),    # 'resnet18', 'mlp'
+            'use_weight_decay': use_weight_decay,
+            'weight_decay_all': weight_decay_all,
+            'use_reweighting_net': use_reweighting_net,
+            'use_augment_net': use_augment_net,
+            'num_layers': num_layer,
+            'dataset': 'boston',
+            'do_classification': False,
+            'do_simple': True,
+            'do_diagnostic': False,
+            'do_print': True,
+            'num_neumann_terms': num_neumann,
+            'use_cg': False,
+            'warmup_epochs': 200,
+            'num_finetune_epochs': 600,
+            'do_inverse_compare': True,
+            'save_hessian': False
+        })
         return test_args
 
 
