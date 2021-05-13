@@ -1,4 +1,5 @@
 import ipdb
+from pprint import pprint
 
 import copy
 import sys
@@ -53,7 +54,7 @@ class AugmentNetTrainer(object):
         self.seeds = seeds or [1]
         self.hyperparams = hyperparams or ['dataAugment']
         self.data_sizes = data_sizes or [100, 200, 1600]
-        self.val_props = val_props or [.0, .1, .25, .5, .75, .9]
+        self.val_props = val_props or [.1, .25, .5, .75, .9]
         self.datasets = datasets or ['mnist']
         self.model = model or 'cnn_mlp'
 
@@ -821,6 +822,7 @@ class AugmentNetTrainer(object):
             train_loss = xentropy_loss_avg / (i + 1)
 
             if not args.only_print_final_vals:
+                import ipdb; ipdb.set_trace()
                 val_loss, val_acc = test(val_loader)
                 # if val_acc >= 0.99 and accuracy >= 0.99 and epoch >= 50: break
                 test_loss, test_acc = test(test_loader)
@@ -916,25 +918,28 @@ class AugmentNetTrainer(object):
         test_args = FinetuneHyperparameters()
         test_args.update_hyperparameters({
             'reg_weight': 0.0,
-            'seed': 9998,
+            'seed': 1,
             'data_augmentation': False,
-            'batch_size': data_size,    # TODO: Do i want a variable batch size?
+            'batch_size': 100,    # TODO: Do i want a variable batch size?
             'val_prop': val_prop,
             'train_size': train_size,
             'val_size': val_size,
             'test_size': -1,            # TODO: For long running, boost test_size and num_epochs
             'num_finetune_epochs': 250,
-            'model': model,
+            'model': 'mlp',
             'use_weight_decay': use_weight_decay,
             'weight_decay_all': weight_decay_all,
             'use_reweighting_net': use_reweighting_net,
             'use_augment_net': use_augment_net,
-            'dataset': dataset,         # 'mnist', 'cifar10'  # TODO: Need to add dataset to the save info?
+            'dataset': 'mnist',#          'mnist', 'cifar10'  # TODO: Need to add dataset to the save info?
             'do_simple': True,
             'do_diagnostic': False,
             'do_print': False,
-            'num_neumann_terms': -1 if val_size == 1 else 0,
-            'use_cg': False
+            'num_neumann_terms': -1 if val_size == 1 else 3,
+            'use_cg': False,
+            'only_print_final_vals': False,
+            'load_checkpoint': '',
+
         })
         return test_args
 
@@ -1178,8 +1183,8 @@ def parse_args():
                         help='Hyperparameter list (default: [dataAugment])')
     parser.add_argument('--data-sizes', type=int, default=[100, 200, 1600], metavar='DSZ', nargs='+',
                         help='Data size list (default: [100, 200, 1600])')
-    parser.add_argument('--val-props', type=float, default=[.0, .1, .25, .5, .75, .9], metavar='VP', nargs='+',
-                        help='Validation proportion list (default: [.0, .1, .25, .5, .75, .9])')
+    parser.add_argument('--val-props', type=float, default=[.1, .25, .5, .75, .9], metavar='VP', nargs='+',
+                        help='Validation proportion list (default: [.1, .25, .5, .75, .9])')
     parser.add_argument('--datasets', type=str, default=['mnist'], metavar='DS', nargs='+',
                         choices=['cifar10', 'cifar100', 'mnist', 'boston'],
                         help='Choose dataset list (default: [mnist])')
