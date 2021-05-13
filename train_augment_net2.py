@@ -148,16 +148,16 @@ class AugmentNetTrainer(object):
             checkpoint = torch.load(args.load_baseline_checkpoint)
             cnn.load_state_dict(checkpoint['model_state_dict'])
 
-        model = cnn.cuda()
+        model = cnn.to(self.device)
         if args.use_weight_decay:
             if args.weight_decay_all:
                 num_p = sum(p.numel() for p in model.parameters())
                 weights = np.ones(num_p) * init_l2
-                model.weight_decay = Variable(torch.FloatTensor(weights).cuda(), requires_grad=True)
+                model.weight_decay = Variable(torch.FloatTensor(weights).to(self.device), requires_grad=True)
             else:
                 weights = init_l2
-                model.weight_decay = Variable(torch.FloatTensor([weights]).cuda(), requires_grad=True)
-            model.weight_decay = model.weight_decay.cuda()
+                model.weight_decay = Variable(torch.FloatTensor([weights]).to(self.device), requires_grad=True)
+            model.weight_decay = model.weight_decay.to(self.device)
         model.train()
         return model, train_loader, val_loader, test_loader, checkpoint
 
@@ -200,7 +200,7 @@ class AugmentNetTrainer(object):
             except KeyError:
                 pass
 
-        augment_net, reweighting_net, baseline_model = augment_net.cuda(), reweighting_net.cuda(), baseline_model.cuda()
+        augment_net, reweighting_net, baseline_model = augment_net.to(self.device), reweighting_net.to(self.device), baseline_model.to(self.device)
         augment_net.train(), reweighting_net.train(), baseline_model.train()
         return augment_net, reweighting_net, baseline_model
 
@@ -442,7 +442,7 @@ class AugmentNetTrainer(object):
         graph_iter = 0
 
         def train_loss_func(x, y):
-            x, y = x.cuda(), y.cuda()
+            x, y = x.to(self.device), y.to(self.device)
             reg = 0.
 
             if args.use_augment_net and (args.num_neumann_terms >= 0 or args.load_finetune_checkpoint != ''):
@@ -505,7 +505,7 @@ class AugmentNetTrainer(object):
             use_reg = False
 
         def val_loss_func(x, y):
-            x, y = x.cuda(), y.cuda()
+            x, y = x.to(self.device), y.to(self.device)
             pred = model(x)
             if args.do_classification:
                 xentropy_loss = F.cross_entropy(pred, y)
@@ -516,7 +516,7 @@ class AugmentNetTrainer(object):
             if args.use_augment_net:
                 if use_reg:
                     num_sample = 10
-                    xs = torch.zeros(num_sample, x.shape[0], x.shape[1], x.shape[2], x.shape[3]).cuda()
+                    xs = torch.zeros(num_sample, x.shape[0], x.shape[1], x.shape[2], x.shape[3]).to(self.device)
                     for i in range(num_sample):
                         xs[i] = augment_net(x, class_label=y)
                     xs_diffs = (torch.abs(torch.mean(xs, dim=0) - x))
@@ -538,7 +538,7 @@ class AugmentNetTrainer(object):
             correct, total = 0., 0.
             losses = []
             for images, labels in loader:
-                images, labels = images.cuda(), labels.cuda()
+                images, labels = images.to(self.device), labels.to(self.device)
                 with torch.no_grad():
                     pred = model(images)
                     if do_test_augment:
@@ -584,7 +584,7 @@ class AugmentNetTrainer(object):
             print(f"num_weights : {num_weights}, num_hypers : {num_hypers}")
 
             # d_train_loss_d_w = gather_flat_grad(d_train_loss_d_w)  # TODO: Commented this out!
-            d_train_loss_d_w = torch.zeros(num_weights).cuda()
+            d_train_loss_d_w = torch.zeros(num_weights).to(self.device)
             model.train(), model.zero_grad()
             for batch_idx, (x, y) in enumerate(train_loader):
                 train_loss, _ = train_loss_func(x, y)
@@ -594,7 +594,7 @@ class AugmentNetTrainer(object):
             optimizer.zero_grad()
 
             # Compute gradients of the validation loss w.r.t. the weights/hypers
-            d_val_loss_d_theta, direct_grad = torch.zeros(num_weights).cuda(), torch.zeros(num_hypers).cuda()
+            d_val_loss_d_theta, direct_grad = torch.zeros(num_weights).to(self.device), torch.zeros(num_hypers).to(self.device)
             model.train(), model.zero_grad()
             for batch_idx, (x, y) in enumerate(val_loader):
                 val_loss = val_loss_func(x, y)
@@ -608,20 +608,20 @@ class AugmentNetTrainer(object):
             # Initialize the preconditioner and counter
             preconditioner = d_val_loss_d_theta
             if do_true_inverse:
-                hessian = torch.zeros(num_weights, num_weights).cuda()
+                hessian = torch.zeros(num_weights, num_weights).to(self.device)
                 for i in range(num_weights):
                     hess_row = gather_flat_grad(grad(d_train_loss_d_w[i], model.parameters(), retain_graph=True))
                     hessian[i] = hess_row
                     # hessian[-i] = hess_row
                 '''
                 hessian = hessian.t()
-                final_hessian = torch.zeros(num_weights, num_weights).cuda()
+                final_hessian = torch.zeros(num_weights, num_weights).to(self.device)
                 for i in range(num_weights):
                     final_hessian[-i] = hessian[i]
                 hessian = final_hessian
                 '''
                 # hessian = hessian  #hessian @ hessian
-                # chol = torch.cholesky(hessian.view(1, num_weights, num_weights))[0] + 1e-3*torch.eye(num_weights).cuda()
+                # chol = torch.cholesky(hessian.view(1, num_weights, num_weights))[0] + 1e-3*torch.eye(num_weights).to(self.device)
                 inv_hessian = torch.pinverse(hessian)
                 # inv_hessian = inv_hessian @ inv_hessian
                 preconditioner = d_val_loss_d_theta @ inv_hessian
@@ -672,19 +672,19 @@ class AugmentNetTrainer(object):
                 '''
 
                 save_hessian(inv_hessian, name='true_inv')
-                new_hessian = torch.zeros(inv_hessian.shape).cuda()
+                new_hessian = torch.zeros(inv_hessian.shape).to(self.device)
                 for param_group in optimizer.param_groups:
                     cur_step_size = param_group['step_size']
                     cur_bias_correction = param_group['bias_correction']
                     print(f'size: {cur_step_size}')
                     break
                 for i in range(10):
-                    hess_term = torch.eye(inv_hessian.shape[0]).cuda()
-                    norm_1, norm_2 = torch.norm(torch.eye(inv_hessian.shape[0]).cuda(), p=2), torch.norm(hessian, p=2)
+                    hess_term = torch.eye(inv_hessian.shape[0]).to(self.device)
+                    norm_1, norm_2 = torch.norm(torch.eye(inv_hessian.shape[0]).to(self.device), p=2), torch.norm(hessian, p=2)
                     for j in range(i):
                         # norm_2 = torch.norm(hessian@hessian, p=2)
-                        hess_term = hess_term @ (torch.eye(inv_hessian.shape[0]).cuda() - norm_1 / norm_2 * hessian)
-                    new_hessian += hess_term  # (torch.eye(inv_hessian.shape[0]).cuda() - elementary_lr*0.1*hessian)
+                        hess_term = hess_term @ (torch.eye(inv_hessian.shape[0]).to(self.device) - norm_1 / norm_2 * hessian)
+                    new_hessian += hess_term  # (torch.eye(inv_hessian.shape[0]).to(self.device) - elementary_lr*0.1*hessian)
                     # if (i+1) % 10 == 0 or i == 0:
                     save_hessian(new_hessian, name='neumann_' + str(i))
             # conjugate_grad(A_vector_multiply_func, d_val_loss_d_theta)
@@ -728,7 +728,7 @@ class AugmentNetTrainer(object):
                 if args.do_print:
                     progress_bar.set_description('Finetune Epoch ' + str(epoch))
 
-                images, labels = images.cuda(), labels.cuda()
+                images, labels = images.to(self.device), labels.to(self.device)
                 # pred = model(images)
                 optimizer.zero_grad()  # TODO: ADDED
                 xentropy_loss, pred = train_loss_func(images, labels)  # F.cross_entropy(pred, labels)
@@ -970,8 +970,7 @@ class AugmentNetTrainer(object):
                             loc += get_id(args) + '/'
                             loc += 'checkpoint.pt'
                             second_args.load_finetune_checkpoint = loc
-                            train_loss_re, accuracy_re, val_loss_re, val_acc_re, test_loss_re, test_acc_re = self.experiment(
-                                second_args)
+                            train_loss_re, accuracy_re, val_loss_re, val_acc_re, test_loss_re, test_acc_re = self.experiment(second_args)
                             data_to_save['val_losses_re'] += [val_loss_re]
                             data_to_save['val_accs_re'] += [val_acc_re]
                             data_to_save['test_losses_re'] += [test_loss_re]
