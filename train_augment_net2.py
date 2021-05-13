@@ -1,3 +1,5 @@
+import ipdb
+
 import copy
 import time
 
@@ -354,7 +356,7 @@ def experiment(args):
 
     # Load the baseline model
     args.load_baseline_checkpoint = None  # '/h/lorraine/PycharmProjects/CG_IFT_test/baseline_checkpoints/cifar10_resnet18_sgdm_lr0.1_wd0.0005_aug1.pt'
-    args.load_finetune_checkpoint = None  # TODO: Make it load the augment net if this is provided
+    args.load_finetune_checkpoint = ''  # TODO: Make it load the augment net if this is provided
     args.only_print_final_vals = False
     model, train_loader, val_loader, test_loader, augment_net, reweighting_net, checkpoint = get_models(args)
 
@@ -908,7 +910,7 @@ def make_val_size_compare(hyperparam, val_prop, data_size, dataset):
     test_args.do_diagnostic = False
     test_args.do_print = False
 
-    test_args.num_neumann_terms = 0
+    test_args.num_neumann_terms = 3
     if test_args.val_size == 1:
         test_args.num_neumann_terms = -1
     test_args.use_cg = False
@@ -1191,7 +1193,7 @@ if __name__ == '__main__':
     seeds = [1]
     hyperparams = ['dataAugment']
     data_sizes = [100, 200, 1600] # TODO: Generalize to other variables - ex. hyper choice
-    val_props = [0., .1, .25, .5, .75, .9]
+    val_props = [.1, .25, .5, .75, .9]
     datasets = ['mnist']
 
     # Uncomment this line to actually run the experiments
