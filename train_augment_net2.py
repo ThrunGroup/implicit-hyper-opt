@@ -17,10 +17,12 @@ from multiprocessing import Pool
 
 import torch
 import torch.optim as optim
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import grad
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
+
 
 # Local imports
 import data_loaders
@@ -59,7 +61,7 @@ class AugmentNetTrainer(object):
         self.model = model or 'cnn_mlp'
 
         if torch.cuda.is_available():
-            print("GPU is available to use in this machine. Using GPU...")
+            print("GPU is available to use in this machine. Using", torch.cuda.device_count(), "GPUs...")
             self.device = torch.device('cuda')
         else:
             print("GPU is not available to use in this machine. Using CPU...")
@@ -375,6 +377,8 @@ class AugmentNetTrainer(object):
         '''
         model, train_loader, val_loader, test_loader, checkpoint = self.load_baseline_model(args)
         augment_net, reweighting_net, model = self.load_finetuned_model(args, model)
+        # model = nn.DataParallel(model)
+        # augment_net = nn.DataParallel(model)
         return model, train_loader, val_loader, test_loader, augment_net, reweighting_net, checkpoint
 
 
@@ -445,10 +449,11 @@ class AugmentNetTrainer(object):
         graph_iter = 0
 
         def train_loss_func(x, y):
-            x, y = x.to(self.device), y.to(self.device)
+            x, y = x.to(f'cuda:{model.device_ids[0]}'), y.to(f'cuda:{model.device_ids[0]}')
             reg = 0.
 
             if args.use_augment_net and (args.num_neumann_terms >= 0 or args.load_finetune_checkpoint != ''):
+                # augment_net = augment_net.to(f'cuda:{model.device_ids[0]}')
                 x = augment_net(x, class_label=y)
 
             pred = model(x)
@@ -822,7 +827,6 @@ class AugmentNetTrainer(object):
             train_loss = xentropy_loss_avg / (i + 1)
 
             if not args.only_print_final_vals:
-                import ipdb; ipdb.set_trace()
                 val_loss, val_acc = test(val_loader)
                 # if val_acc >= 0.99 and accuracy >= 0.99 and epoch >= 50: break
                 test_loss, test_acc = test(test_loader)
@@ -926,7 +930,7 @@ class AugmentNetTrainer(object):
             'val_size': val_size,
             'test_size': -1,            # TODO: For long running, boost test_size and num_epochs
             'num_finetune_epochs': 250,
-            'model': 'mlp',
+            'model': model,
             'use_weight_decay': use_weight_decay,
             'weight_decay_all': weight_decay_all,
             'use_reweighting_net': use_reweighting_net,
@@ -1181,10 +1185,10 @@ def parse_args():
     parser.add_argument('--hyperparams', type=str, default=['dataAugment'], metavar='H', nargs='+',
                         choices=['weightDecayParams', 'weightDecayGlobal', 'dataAugment', 'lossReweight'],
                         help='Hyperparameter list (default: [dataAugment])')
-    parser.add_argument('--data-sizes', type=int, default=[100, 200, 1600], metavar='DSZ', nargs='+',
-                        help='Data size list (default: [100, 200, 1600])')
-    parser.add_argument('--val-props', type=float, default=[.1, .25, .5, .75, .9], metavar='VP', nargs='+',
-                        help='Validation proportion list (default: [.1, .25, .5, .75, .9])')
+    parser.add_argument('--data-sizes', type=int, default=[50000], metavar='DSZ', nargs='+',
+                        help='Data size list (default: [50000])')
+    parser.add_argument('--val-props', type=float, default=[0.1], metavar='VP', nargs='+',
+                        help='Validation proportion list (default: [0.1])')
     parser.add_argument('--datasets', type=str, default=['mnist'], metavar='DS', nargs='+',
                         choices=['cifar10', 'cifar100', 'mnist', 'boston'],
                         help='Choose dataset list (default: [mnist])')
