@@ -50,12 +50,12 @@ def load_mnist(batch_size, val_split=True, subset=[-1, -1, -1], num_train=50000,
         original_trainset = datasets.MNIST(root='./data/mnist', train=True, download=True, transform=transform)
         trainset = original_trainset
         trainset.data = trainset.train_data[:num_train, :, :]
-        trainset.labels = trainset.train_labels[:num_train]
+        trainset.targets = trainset.train_labels[:num_train]
 
         # Validation set
-        valset = datasets.MNIST(root='./data/mnist', train=True, download=True, transform=transform)
+        valset = datasets.MNIST(root='./data/mnist', train=True, download=True, transform=transform) # (@Mo): we don't need this, can use above
         valset.data = valset.train_data[num_train:, :, :]
-        valset.labels = valset.train_labels[num_train:]
+        valset.targets = valset.train_labels[num_train:]
 
         # Test set
         testset = datasets.MNIST(root='./data/mnist', train=False, download=True, transform=transform)

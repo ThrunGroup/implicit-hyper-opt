@@ -1,3 +1,5 @@
+import ipdb
+
 import copy
 import sys
 import time
@@ -7,8 +9,9 @@ import numpy as np
 from tqdm import tqdm
 
 import pickle
-import matplotlib.pyplot as plt
+
 import matplotlib as mpl
+import matplotlib.pyplot as plt
 from multiprocessing import Pool
 
 import torch
@@ -218,7 +221,6 @@ class AugmentNetTrainer(object):
                 p.grad = p.grad * 0 # TODO (@Mo): Is this necessary? Could just set to 0?
             current_index += p_num_params
 
-
     def store_hypergrad(self, get_hyper_train, total_d_val_loss_d_lambda):
         """
         Updates the hypergradients and the number of hyperparameters?
@@ -365,7 +367,6 @@ class AugmentNetTrainer(object):
         }
 
         return X_k, info
-
 
     def get_models(self, args):
         '''
@@ -1167,7 +1168,6 @@ class AugmentNetTrainer(object):
 
     # def curried_run_val(seed):
     #     return run_val_prop_compare(hyperparams, data_sizes, val_props, [seed], datasets)
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="PyTorch Data Augmentation Example")
