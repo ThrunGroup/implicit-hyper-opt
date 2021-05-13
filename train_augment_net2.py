@@ -1,3 +1,5 @@
+import ipdb
+
 import copy
 import time
 
@@ -6,8 +8,9 @@ import numpy as np
 from tqdm import tqdm
 
 import pickle
-import matplotlib.pyplot as plt
+
 import matplotlib as mpl
+import matplotlib.pyplot as plt
 from multiprocessing import Pool
 
 import torch
@@ -34,6 +37,8 @@ from models.simple_models import CNN, Net
 from train_augment_net_multiple import load_logger, get_id
 from train_augment_net_graph import save_images
 from train_augment_net_multiple import make_parser, make_argss
+
+
 
 
 def saver(epoch, elementary_model, elementary_optimizer, augment_net, reweighting_net, hyper_optimizer, path):
@@ -354,7 +359,8 @@ def experiment(args):
 
     # Load the baseline model
     args.load_baseline_checkpoint = None  # '/h/lorraine/PycharmProjects/CG_IFT_test/baseline_checkpoints/cifar10_resnet18_sgdm_lr0.1_wd0.0005_aug1.pt'
-    args.load_finetune_checkpoint = None  # TODO: Make it load the augment net if this is provided
+    args.load_finetune_checkpoint = ''  # TODO: Make it load the augment net if this is provided
+    args.only_print_final_vals = False
     model, train_loader, val_loader, test_loader, augment_net, reweighting_net, checkpoint = get_models(args)
 
     # Load the logger
@@ -514,8 +520,8 @@ def experiment(args):
                         shape_0, shape_1 = pred.shape[0], pred.shape[1]
                         pred = pred.view(1, shape_0, shape_1)  # Batch size, num_classes
                         for _ in range(num_augment):
-                            pred = torch.cat((pred, model(augment_net(images)).view(1, shape_0, shape_1)))
-                        pred = torch.mean(pred, dim=0)
+                            pred = torch.cat((pred, model(augment_net(images)).view(1, shape_0, shape_1))) # TODO (@Mo): Should we be augmenting the validation images?
+                        pred = torch.mean(pred, dim=0) # TODO (@Mo): This is certainly a weird way of getting a prediction...
                 if args.do_classification:
                     xentropy_loss = F.cross_entropy(pred, labels)
                 else:
@@ -780,6 +786,7 @@ def experiment(args):
                                          'hypergradient_cos_diff': hypergradient_cos_diff,
                                          'hypergradient_l2_diff': hypergradient_l2_diff,
                                          'iteration': iteration})
+
         if use_scheduler:
             scheduler.step(epoch)
         if use_hyper_scheduler:
@@ -804,6 +811,8 @@ def experiment(args):
             if args.do_print:
                 val_loss, val_acc = test(val_loader, do_test_augment=False)
                 tqdm.write('val loss: {:6.4f} | val acc: {:6.4f}'.format(val_loss, val_acc))
+
+
     val_loss, val_acc = test(val_loader)
     test_loss, test_acc = test(test_loader)
     saver(args.num_finetune_epochs, model, optimizer, augment_net, reweighting_net, hyper_optimizer, args.save_loc)
@@ -875,8 +884,8 @@ def make_val_size_compare(hyperparam, val_prop, data_size, dataset):
 
     # TODO: For long running, boost test_size and num_epochs
     test_args.test_size = -1
-    test_args.num_finetune_epochs = 250
-    test_args.model = 'cnn_mlp'  # 'resnet18', 'mlp'
+    test_args.num_finetune_epochs = 10 # @Mo: 250
+    test_args.model = 'mlp'  # 'resnet18', 'mlp'
 
     if hyperparam == 'weightDecayParams':
         test_args.use_weight_decay = True
@@ -904,7 +913,7 @@ def make_val_size_compare(hyperparam, val_prop, data_size, dataset):
     test_args.do_diagnostic = False
     test_args.do_print = False
 
-    test_args.num_neumann_terms = 0
+    test_args.num_neumann_terms = 3
     if test_args.val_size == 1:
         test_args.num_neumann_terms = -1
     test_args.use_cg = False
@@ -921,10 +930,10 @@ def run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets):
                                     'val_losses_re': [], 'val_accs_re': [], 'test_losses_re': [], 'test_accs_re': [],
                                     'info': ''}
                     for val_prop in val_props:
-                        print(
-                            f"seed:{seed}, dataset:{dataset}, hyperparam:{hyperparam}, data_size:{data_size}, prop:{val_prop}")
+                        print(f"seed:{seed}, dataset:{dataset}, hyperparam:{hyperparam}, data_size:{data_size}, prop:{val_prop}")
                         args = make_val_size_compare(hyperparam, val_prop, data_size, dataset)
                         args.seed = seed
+                        print("Running experiment:", args)
                         train_loss, accuracy, val_loss, val_acc, test_loss, test_acc = experiment(args)
                         data_to_save['val_losses'] += [val_loss]
                         data_to_save['val_accs'] += [val_acc]
@@ -938,6 +947,7 @@ def run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets):
                         loc += get_id(args) + '/'
                         loc += 'checkpoint.pt'
                         second_args.load_finetune_checkpoint = loc
+                        print("Running experiment:", args)
                         train_loss_re, accuracy_re, val_loss_re, val_acc_re, test_loss_re, test_acc_re = experiment(
                             second_args)
                         data_to_save['val_losses_re'] += [val_loss_re]
@@ -980,7 +990,9 @@ def graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, e
         y_axis += '_re'
 
     for data_size in data_sizes[::-1]:
-        if data_size in exclude_sizes: continue
+        if data_size in exclude_sizes:
+            continue
+
         color = None
         for i, hyperparam in enumerate(hyperparams):
             data_to_graph = []
@@ -995,6 +1007,7 @@ def graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, e
                 data_to_graph += [data_for_seed[y_axis]]
 
             label = 'Size:' + str(data_size)
+
             if hyperparam == 'weightDecayParams' and data_size == data_sizes[0]:
                 hyperlabel = 'WD per weight'
                 label += ',Hyper:' + hyperlabel
@@ -1005,14 +1018,17 @@ def graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, e
             # if seed != seeds[0]: label = None
 
             if data_size != data_sizes[0] and hyperparam != hyperparams[0]: label = None
+
             plot = plt.errorbar(val_props,
                                 np.mean(data_to_graph, axis=0),
                                 .5 * np.std(data_to_graph, axis=0),
                                 label=label, linestyle=linestyles[i], c=color, alpha=1.0,
                                 linewidth=linewidth)
             color = plot[0].get_color()
+
     if not retrain:
         plt.axvline(0.1, color='black', linewidth=2.0, alpha=1.0, zorder=1)
+
     plt.xlabel('Proportion data in valid')
     plt.ylabel('Test Accuracy')
     plt.title(title)
@@ -1029,7 +1045,9 @@ def graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, e
 
     np.clip(np.round(np.array(val_props) * data_size), 1, 10e32)
     for data_size in data_sizes:
-        if data_size in exclude_sizes: continue
+        if data_size in exclude_sizes:
+            continue
+
         color = None
         for i, hyperparam in enumerate(hyperparams):
             data_to_graph = []
@@ -1042,8 +1060,11 @@ def graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, e
                     print(f"Could not open {pickle_name}")
                     break
                 data_to_graph += [data_for_seed[y_axis]]
+
             label = 'Size:' + str(data_size) + ',Hyper:' + hyperparam + ',Data:' + dataset
+
             # if seed != seeds[0]: label = None
+
             if data_size != data_sizes[0] and hyperparam != hyperparams[0]: label = None
             plot = plt.errorbar(np.clip(np.round(np.array(val_props) * data_size), 1, 10e32),
                                 np.mean(data_to_graph, axis=0),
@@ -1051,6 +1072,7 @@ def graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, e
                                 label=label, linestyle=linestyles[i], c=color, alpha=1.0,
                                 linewidth=linewidth)
             color = plot[0].get_color()
+
     if not retrain:
         plt.axvline(0.1, color='black', linewidth=2.0, alpha=1.0, zorder=1)
     plt.xlabel('Number data in valid')
@@ -1174,9 +1196,10 @@ if __name__ == '__main__':
     seeds = [1]
     hyperparams = ['dataAugment']
     data_sizes = [100, 200, 1600] # TODO: Generalize to other variables - ex. hyper choice
-    val_props = [.0, .1, .25, .5, .75, .9]
+    val_props = [.1, .25, .5, .75, .9]
     datasets = ['mnist']
 
+    # Uncomment this line to actually run the experiments
     run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets)
 
     for dataset in datasets:
