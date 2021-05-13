@@ -1,4 +1,5 @@
 import copy
+import sys
 import time
 
 import argparse
@@ -852,7 +853,7 @@ def make_inverse_compare_arg():
     return test_args
 
 
-def make_val_size_compare(hyperparam, val_prop, data_size, dataset):
+def make_val_size_compare(hyperparam, val_prop, data_size, dataset, model):
     '''
     Not sure
     '''
@@ -876,7 +877,7 @@ def make_val_size_compare(hyperparam, val_prop, data_size, dataset):
     # TODO: For long running, boost test_size and num_epochs
     test_args.test_size = -1
     test_args.num_finetune_epochs = 250
-    test_args.model = 'cnn_mlp'  # 'resnet18', 'mlp'
+    test_args.model = model
 
     if hyperparam == 'weightDecayParams':
         test_args.use_weight_decay = True
@@ -911,7 +912,7 @@ def make_val_size_compare(hyperparam, val_prop, data_size, dataset):
     return test_args
 
 
-def run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets):
+def run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets, model):
     # TODO (@Mo): Use itertools' product
     for seed in seeds:
         for dataset in datasets:
@@ -923,7 +924,7 @@ def run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets):
                     for val_prop in val_props:
                         print(
                             f"seed:{seed}, dataset:{dataset}, hyperparam:{hyperparam}, data_size:{data_size}, prop:{val_prop}")
-                        args = make_val_size_compare(hyperparam, val_prop, data_size, dataset)
+                        args = make_val_size_compare(hyperparam, val_prop, data_size, dataset, model)
                         args.seed = seed
                         train_loss, accuracy, val_loss, val_acc, test_loss, test_acc = experiment(args)
                         data_to_save['val_losses'] += [val_loss]
@@ -1154,6 +1155,26 @@ def curried_run_val(seed):
     return run_val_prop_compare(hyperparams, data_sizes, val_props, [seed], datasets)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="PyTorch Data Augmentation Example")
+    parser.add_argument('--seeds', type=int, default=[1], metavar='S', nargs='+',
+                        help='Random seed list (default: [1])')
+    parser.add_argument('--hyperparams', type=str, default=['dataAugment'], metavar='H', nargs='+',
+                        choices=['weightDecayParams', 'weightDecayGlobal', 'dataAugment', 'lossReweight'],
+                        help='Hyperparameter list (default: [dataAugment])')
+    parser.add_argument('--data-sizes', type=int, default=[100, 200, 1600], metavar='DSZ', nargs='+',
+                        help='Data size list (default: [100, 200, 1600])')
+    parser.add_argument('--val-props', type=float, default=[.0, .1, .25, .5, .75, .9], metavar='VP', nargs='+',
+                        help='Validation proportion list (default: [.0, .1, .25, .5, .75, .9])')
+    parser.add_argument('--datasets', type=str, default=['mnist'], metavar='DS', nargs='+',
+                        choices=['cifar10', 'cifar100', 'mnist', 'boston'],
+                        help='Choose dataset list (default: [mnist])')
+    parser.add_argument('--model', type=str, default=['cnn_mlp'], metavar='DS', nargs='+',
+                        choices=['resnet18', 'wideresnet', 'mlp', 'cnn_mlp'],
+                        help='Choose a model (default: [cnn_mlp])')
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
     # experiment(make_test_arg())
     # experiment(make_inverse_compare_arg())
@@ -1170,22 +1191,24 @@ if __name__ == '__main__':
     # p = Pool(len(seeds))
     # p.map(curried_run_val, seeds)
 
-    #List of 'dataAugment', 'weightDecayParams', and/or 'weightDecayGlobal'
-    seeds = [1]
-    hyperparams = ['dataAugment']
-    data_sizes = [100, 200, 1600] # TODO: Generalize to other variables - ex. hyper choice
-    val_props = [.0, .1, .25, .5, .75, .9]
-    datasets = ['mnist']
+    args = parse_args()
 
-    run_val_prop_compare(hyperparams, data_sizes, val_props, seeds, datasets)
+    if torch.cuda.is_available():
+        print("GPU is available to use in this machine. Using GPU...")
+        # TODO: change torch device like this.
+        # device = torch.device('cuda')
+    else:
+        print("GPU is not available to use in this machine. Using CPU...")
 
-    for dataset in datasets:
+    run_val_prop_compare(args.hyperparams, args.data_sizes, args.val_props, args.seeds, args.datasets, args.model)
+
+    for dataset in args.datasets:
         exclude_sizes = []  # 50]
         fontsize = 16
-        graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, exclude_sizes=exclude_sizes,
-                               do_legend=False, fontsize=fontsize)
-        graph_val_prop_compare(hyperparams, data_sizes, val_props, seeds, dataset, exclude_sizes=exclude_sizes,
-                               retrain=True, do_legend=True, fontsize=fontsize)
+        graph_val_prop_compare(args.hyperparams, args.data_sizes, args.val_props, args.seeds, dataset,
+                               exclude_sizes=exclude_sizes, do_legend=False, fontsize=fontsize)
+        graph_val_prop_compare(args.hyperparams, args.data_sizes, args.val_props, args.seeds, dataset,
+                               exclude_sizes=exclude_sizes, retrain=True, do_legend=True, fontsize=fontsize)
 
     '''
     # TODO: THE TRICK IS TO TRIAN FOR A LOT OF ITERATIONS!!!
