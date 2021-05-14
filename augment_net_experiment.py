@@ -5,19 +5,15 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-import data_loaders
-from data_loaders import load_boston, load_mnist
-from models.cnn_mlp import CNN_MLP
-from models.resnet import ResNet18
-from models.simple_models import Net
-from models.unet import UNet
-from models.wide_resnet import WideResNet
+from data_loaders import DataLoaders
 from train_augment_net_graph import save_images
 from train_augment_net_multiple import load_logger, get_id
-from torch.autograd import grad, Variable
+from torch.autograd import grad
 from torch.optim.lr_scheduler import MultiStepLR
 from tqdm import tqdm
-from utils.util import gather_flat_grad
+
+from utils.model_loader import ModelLoader
+from utils.util import gather_flat_grad, save_models
 
 
 def experiment(args, device):
@@ -32,12 +28,20 @@ def experiment(args, device):
     # Load the baseline model
     args.load_baseline_checkpoint = None  # '/h/lorraine/PycharmProjects/CG_IFT_test/baseline_checkpoints/cifar10_resnet18_sgdm_lr0.1_wd0.0005_aug1.pt'
     args.load_finetune_checkpoint = ''  # TODO: Make it load the augment net if this is provided
-    model, train_loader, val_loader, test_loader, augment_net, reweighting_net, checkpoint = get_models(args, device)
+
+    train_loader, val_loader, test_loader = DataLoaders.get_data_loaders(dataset=args.dataset,
+                                                                         batch_size=args.batch_size,
+                                                                         train_size=args.train_size,
+                                                                         val_size=args.val_size,
+                                                                         test_size=args.test_size,
+                                                                         num_train=50000,
+                                                                         data_augment=args.data_augmentation)
+    model_loader = ModelLoader(args, device)
+    model, augment_net, reweighting_net, checkpoint = model_loader.get_models()
 
     # Load the logger
     csv_logger, test_id = load_logger(args)
     args.save_loc = './finetuned_checkpoints/' + get_id(args)
-
 
     # Setup the optimizers
     if args.load_baseline_checkpoint is not None:
@@ -171,7 +175,7 @@ def experiment(args, device):
                         save_images(images, labels, augment_net, args)
                 if not args.do_simple or args.do_inverse_compare:
                     if not args.do_simple:
-                        saver(epoch, model, optimizer, augment_net, reweighting_net, hyper_optimizer, args.save_loc)
+                        save_models(epoch, model, optimizer, augment_net, reweighting_net, hyper_optimizer, args.save_loc)
                     val_loss, val_acc = test(val_loader, args, model, augment_net, device)
                     csv_logger.writerow({'epoch': str(epoch),
                                          'train_loss': str(xentropy_loss_avg / (i + 1)), 'train_acc': str(accuracy),
@@ -208,7 +212,7 @@ def experiment(args, device):
 
     val_loss, val_acc = test(val_loader, args, model, augment_net, device)
     test_loss, test_acc = test(test_loader, args, model, augment_net, device)
-    saver(args.num_finetune_epochs, model, optimizer, augment_net, reweighting_net, hyper_optimizer, args.save_loc)
+    save_models(args.num_finetune_epochs, model, optimizer, augment_net, reweighting_net, hyper_optimizer, args.save_loc)
     return train_loss, accuracy, val_loss, val_acc, test_loss, test_acc
 
 
@@ -485,40 +489,6 @@ def neumann_hyperstep_preconditioner(d_val_loss_d_theta, d_train_loss_d_w, eleme
     return elementary_lr * preconditioner
 
 
-def saver(epoch, elementary_model, elementary_optimizer, augment_net, reweighting_net, hyper_optimizer, path):
-    """
-    Saves torch models
-
-    :param epoch:
-    :param elementary_model:
-    :param elementary_optimizer:
-    :param augment_net:
-    :param reweighting_net:
-    :param hyper_optimizer:
-    :param path:
-    :return:
-    """
-    if 'weight_decay' in elementary_model.__dict__:
-        torch.save({
-            'epoch': epoch,
-            'elementary_model_state_dict': elementary_model.state_dict(),
-            'weight_decay': elementary_model.weight_decay,
-            'elementary_optimizer_state_dict': elementary_optimizer.state_dict(),
-            'augment_model_state_dict': augment_net.state_dict(),
-            'reweighting_net_state_dict': reweighting_net.state_dict(),
-            'hyper_optimizer_state_dict': hyper_optimizer.state_dict()
-        }, path + '/checkpoint.pt')
-    else:
-        torch.save({
-            'epoch': epoch,
-            'elementary_model_state_dict': elementary_model.state_dict(),
-            'elementary_optimizer_state_dict': elementary_optimizer.state_dict(),
-            'augment_model_state_dict': augment_net.state_dict(),
-            'reweighting_net_state_dict': reweighting_net.state_dict(),
-            'hyper_optimizer_state_dict': hyper_optimizer.state_dict()
-        }, path + '/checkpoint.pt')
-
-
 def zero_hypergrad(get_hyper_train, args, model, augment_net, reweighting_net):
     """
     :param get_hyper_train:
@@ -664,120 +634,6 @@ def cg_batch(A_bmm, B, M_bmm=None, X0=None, rtol=1e-4, atol=0.0, maxiter=10, ver
     }
 
     return X_k, info
-
-
-def get_models(args, device):
-    '''
-    Loads both the baseline model and the finetuning models in train mode
-    '''
-    model, train_loader, val_loader, test_loader, checkpoint = load_baseline_model(args, device)
-    augment_net, reweighting_net, model = load_finetuned_model(args, model, device)
-    # model = nn.DataParallel(model)
-    # augment_net = nn.DataParallel(model)
-    return model, train_loader, val_loader, test_loader, augment_net, reweighting_net, checkpoint
-
-
-def load_baseline_model(args, device):
-    """
-    Load a simple baseline model AND dataset
-    Note that this sets the model to training mode
-
-    :param args:
-    :return:
-    """
-    if args.dataset == 'cifar10':
-        imsize, in_channel, num_classes = 32, 3, 10
-        train_loader, val_loader, test_loader = data_loaders.load_cifar10(args.batch_size, val_split=True,
-                                                                          augmentation=args.data_augmentation,
-                                                                          subset=[args.train_size, args.val_size,
-                                                                                  args.test_size])
-    elif args.dataset == 'cifar100':
-        imsize, in_channel, num_classes = 32, 3, 100
-        train_loader, val_loader, test_loader = data_loaders.load_cifar100(args.batch_size, val_split=True,
-                                                                           augmentation=args.data_augmentation,
-                                                                           subset=[args.train_size, args.val_size,
-                                                                                   args.test_size])
-    elif args.dataset == 'mnist':
-        imsize, in_channel, num_classes = 28, 1, 10
-        num_train = 50000
-        train_loader, val_loader, test_loader = load_mnist(args.batch_size,
-                                                           subset=[args.train_size, args.val_size, args.test_size],
-                                                           num_train=num_train, only_split_train=False)
-    elif args.dataset == 'boston':
-        imsize, in_channel, num_classes = 13, 1, 1
-        train_loader, val_loader, test_loader = load_boston(args.batch_size)
-
-    init_l2 = -7  # TODO: Important to make sure this is small enough to be unregularized when starting?
-    if args.model == 'resnet18':
-        cnn = ResNet18(num_classes=num_classes)
-    elif args.model == 'wideresnet':
-        cnn = WideResNet(depth=28, num_classes=num_classes, widen_factor=10, dropRate=0.3)
-    elif args.model[:3] == 'mlp':
-        cnn = Net(args.num_layers, 0.0, imsize, in_channel, init_l2, num_classes=num_classes,
-                  do_classification=args.do_classification)
-    elif args.model == 'cnn_mlp':
-        cnn = CNN_MLP(learning_rate=0.0001)
-
-    checkpoint = None
-    if args.load_baseline_checkpoint:
-        checkpoint = torch.load(args.load_baseline_checkpoint)
-        cnn.load_state_dict(checkpoint['model_state_dict'])
-
-    model = cnn.to(device)
-    if args.use_weight_decay:
-        if args.weight_decay_all:
-            num_p = sum(p.numel() for p in model.parameters())
-            weights = np.ones(num_p) * init_l2
-            model.weight_decay = Variable(torch.FloatTensor(weights).to(device), requires_grad=True)
-        else:
-            weights = init_l2
-            model.weight_decay = Variable(torch.FloatTensor([weights]).to(device), requires_grad=True)
-        model.weight_decay = model.weight_decay.to(device)
-    model.train()
-    return model, train_loader, val_loader, test_loader, checkpoint
-
-
-def load_finetuned_model(args, baseline_model, device):
-    """
-    Loads the augmentation net, sample reweighting net, and baseline model
-    Note: sets all these models to train mode
-
-    :param args:
-    :param baseline_model:
-    :return:
-    """
-    # augment_net = Net(0, 0.0, 32, 3, 0.0, num_classes=32**2 * 3, do_res=True)
-    if args.dataset == 'mnist':
-        imsize, in_channel, num_classes = 28, 1, 10
-    else:
-        imsize, in_channel, num_classes = 32, 3, 10
-
-    augment_net = UNet(in_channels=in_channel, n_classes=in_channel, depth=2, wf=3, padding=True, batch_norm=False,
-                       do_noise_channel=True,
-                       up_mode='upconv', use_identity_residual=True)  # TODO(PV): Initialize UNet properly
-    # TODO (JON): DEPTH 1 WORKED WELL.  Changed upconv to upsample.  Use a wf of 2.
-
-    # This ResNet outputs scalar weights to be applied element-wise to the per-example losses
-    reweighting_net = Net(1, 0.0, imsize, in_channel, 0.0, num_classes=1)
-    # resnet_cifar.resnet20(num_classes=1)
-
-    if args.load_finetune_checkpoint:
-        checkpoint = torch.load(args.load_finetune_checkpoint)
-        # temp_baseline_model = baseline_model
-        # baseline_model.load_state_dict(checkpoint['elementary_model_state_dict'])
-        if 'weight_decay' in checkpoint:
-            baseline_model.weight_decay = checkpoint['weight_decay']
-        # baseline_model.weight_decay = temp_baseline_model.weight_decay
-        # baseline_model.load_state_dict(checkpoint['elementary_model_state_dict'])
-        augment_net.load_state_dict(checkpoint['augment_model_state_dict'])
-        try:
-            reweighting_net.load_state_dict(checkpoint['reweighting_model_state_dict'])
-        except KeyError:
-            pass
-
-    augment_net, reweighting_net, baseline_model = augment_net.to(device), reweighting_net.to(device), baseline_model.to(device)
-    augment_net.train(), reweighting_net.train(), baseline_model.train()
-    return augment_net, reweighting_net, baseline_model
 
 
 def save_hessian(hessian, name):

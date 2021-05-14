@@ -222,3 +222,28 @@ def test_jacobian():
     fg = grad(f, x, create_graph=True)
     print(eval_jacobian(gather_flat_grad(fg), y))
     print(A)
+
+
+def save_models(epoch, elementary_model, elementary_optimizer, augment_net, reweighting_net, hyper_optimizer, path):
+    """
+    Saves torch models
+    """
+    if 'weight_decay' in elementary_model.__dict__:
+        torch.save({
+            'epoch': epoch,
+            'elementary_model_state_dict': elementary_model.state_dict(),
+            'weight_decay': elementary_model.weight_decay,
+            'elementary_optimizer_state_dict': elementary_optimizer.state_dict(),
+            'augment_model_state_dict': augment_net.state_dict(),
+            'reweighting_net_state_dict': reweighting_net.state_dict(),
+            'hyper_optimizer_state_dict': hyper_optimizer.state_dict()
+        }, path + '/checkpoint.pt')
+    else:
+        torch.save({
+            'epoch': epoch,
+            'elementary_model_state_dict': elementary_model.state_dict(),
+            'elementary_optimizer_state_dict': elementary_optimizer.state_dict(),
+            'augment_model_state_dict': augment_net.state_dict(),
+            'reweighting_net_state_dict': reweighting_net.state_dict(),
+            'hyper_optimizer_state_dict': hyper_optimizer.state_dict()
+        }, path + '/checkpoint.pt')

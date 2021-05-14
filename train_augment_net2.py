@@ -11,6 +11,8 @@ import torch
 
 # Local imports
 from augment_net_experiment import experiment
+from constants import DATASET_BOSTON, DATASET_MNIST, DATASET_CIFAR_100, DATASET_CIFAR_10, MODEL_RESNET18, \
+    MODEL_WIDERESNET, MODEL_MLP, MODEL_CNN_MLP
 from finetune_hyperparameters import FinetuneHyperparameters
 from train_augment_net_multiple import get_id
 
@@ -392,11 +394,11 @@ def parse_args():
     parser.add_argument('--val-props', type=float, default=[0.1], metavar='VP', nargs='+',
                         help='Validation proportion list (default: [0.1])')
     parser.add_argument('--datasets', type=str, default=['mnist'], metavar='DS', nargs='+',
-                        choices=['cifar10', 'cifar100', 'mnist', 'boston'],
-                        help='Choose dataset list (default: [mnist])')
+                        choices=[DATASET_CIFAR_10, DATASET_CIFAR_100, DATASET_MNIST, DATASET_BOSTON],
+                        help=f"Choose dataset list (default: [{DATASET_MNIST}])")
     parser.add_argument('--model', type=str, default='mlp', metavar='M',
-                        choices=['resnet18', 'wideresnet', 'mlp', 'cnn_mlp'],
-                        help='Choose a model (default: mlp)')
+                        choices=[MODEL_RESNET18, MODEL_WIDERESNET, MODEL_MLP, MODEL_CNN_MLP],
+                        help=f"Choose a model (default: {MODEL_MLP})")
     parser.add_argument('--num-finetune-epochs', type=int, default=200, metavar='NFE',
                         help='Number of fine-tuning epochs (default: 200)')
     parser.add_argument('--lr', type=int, default=0.1, metavar='LR',
