@@ -245,8 +245,7 @@ class AugmentNetTrainer(object):
         for i in range(num_neumann_terms):
             old_counter = counter
             # This increments counter to counter * (I - hessian) = counter - counter * hessian
-            hessian_term = gather_flat_grad(
-                grad(d_train_loss_d_w, model.parameters(), grad_outputs=counter.view(-1), retain_graph=True))
+            hessian_term = gather_flat_grad(grad(d_train_loss_d_w, model.parameters(), grad_outputs=counter.contiguous().view(-1), retain_graph=True))
             counter = old_counter - elementary_lr * hessian_term
             preconditioner = preconditioner + counter
         return elementary_lr * preconditioner
@@ -680,7 +679,7 @@ class AugmentNetTrainer(object):
 
         # Setup the optimizers
         if args.load_baseline_checkpoint is not None:
-            args.lr = args.lr * 0.2 * 0.2 * 0.2
+            args.lr = args.lr * 0.2 * 0.2 * 0.2 # TODO (@Mo): oh my god no
         if args.use_weight_decay:
             # optimizer = optim.Adam(model.parameters(), lr=1e-3)
             args.wdecay = 0
@@ -827,12 +826,11 @@ class AugmentNetTrainer(object):
             train_loss = xentropy_loss_avg / (i + 1)
 
             if not args.only_print_final_vals:
-                import ipdb; ipdb.set_trace()
                 val_loss, val_acc = test(val_loader)
                 # if val_acc >= 0.99 and accuracy >= 0.99 and epoch >= 50: break
                 test_loss, test_acc = test(test_loader)
-                tqdm.write('val loss: {:6.4f} | val acc: {:6.4f} | test loss: {:6.4f} | test_acc: {:6.4f}'.format(
-                    val_loss, val_acc, test_loss, test_acc))
+                tqdm.write('epoch: {:d} | val loss: {:6.4f} | val acc: {:6.4f} | test loss: {:6.4f} | test_acc: {:6.4f}'.format(
+                    epoch, val_loss, val_acc, test_loss, test_acc))
 
                 csv_logger.writerow({'epoch': str(epoch),
                                      'train_loss': str(train_loss), 'train_acc': str(accuracy),
@@ -844,6 +842,7 @@ class AugmentNetTrainer(object):
             elif args.do_print:
                 val_loss, val_acc = test(val_loader, do_test_augment=False)
                 tqdm.write('val loss: {:6.4f} | val acc: {:6.4f}'.format(val_loss, val_acc))
+
 
         val_loss, val_acc = test(val_loader)
         test_loss, test_acc = test(test_loader)
@@ -957,8 +956,7 @@ class AugmentNetTrainer(object):
                                         'val_losses_re': [], 'val_accs_re': [], 'test_losses_re': [], 'test_accs_re': [],
                                         'info': ''}
                         for val_prop in self.val_props:
-                            print(
-                                f"seed:{seed}, dataset:{dataset}, hyperparam:{hyperparam}, data_size:{data_size}, prop:{val_prop}")
+                            print(f"seed:{seed}, dataset:{dataset}, hyperparam:{hyperparam}, data_size:{data_size}, prop:{val_prop}")
                             args = self.make_val_size_compare(hyperparam, val_prop, data_size, dataset, self.model)
                             args.seed = seed
                             train_loss, accuracy, val_loss, val_acc, test_loss, test_acc = self.experiment(args)
@@ -1184,7 +1182,7 @@ def parse_args():
     parser.add_argument('--hyperparams', type=str, default=['dataAugment'], metavar='H', nargs='+',
                         choices=['weightDecayParams', 'weightDecayGlobal', 'dataAugment', 'lossReweight'],
                         help='Hyperparameter list (default: [dataAugment])')
-    parser.add_argument('--data-sizes', type=int, default=[100], metavar='DSZ', nargs='+',
+    parser.add_argument('--data-sizes', type=int, default=[50000], metavar='DSZ', nargs='+',
                         help='Data size list (default: [50000])')
     parser.add_argument('--val-props', type=float, default=[0.1], metavar='VP', nargs='+',
                         help='Validation proportion list (default: [0.1])')

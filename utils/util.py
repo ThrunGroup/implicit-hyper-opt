@@ -150,7 +150,7 @@ def gather_flat_grad(loss_grad):
     #for g in loss_grad:
     #    g_vector = g.contiguous().view(-1) if cnt == 0 else torch.cat([g_vector, g.contiguous().view(-1)])
     #    cnt = 1
-    return torch.cat([p.view(-1) for p in loss_grad]) #g_vector
+    return torch.cat([p.contiguous().view(-1) for p in loss_grad]) #g_vector
 
 
 def eval_hessian(g_vector, model, is_cuda):
