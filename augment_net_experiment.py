@@ -177,14 +177,8 @@ def experiment(args, device):
                     if not args.do_simple:
                         save_models(epoch, model, optimizer, augment_net, reweighting_net, hyper_optimizer, args.save_loc)
                     val_loss, val_acc = test(val_loader, args, model, augment_net, device)
-                    csv_logger.writerow({'epoch': str(epoch),
-                                         'train_loss': str(xentropy_loss_avg / (i + 1)), 'train_acc': str(accuracy),
-                                         'val_loss': str(val_loss), 'val_acc': str(val_acc),
-                                         'test_loss': str(test_loss), 'test_acc': str(test_acc),
-                                         'run_time': time.time() - init_time,
-                                         'hypergradient_cos_diff': hypergradient_cos_diff,
-                                         'hypergradient_l2_diff': hypergradient_l2_diff,
-                                         'iteration': iteration})
+                    csv_logger.writerow(epoch, xentropy_loss_avg / (i + 1), accuracy, val_loss, val_acc, test_loss, test_acc,
+                                        hypergradient_cos_diff, hypergradient_l2_diff, time.time() - init_time, iteration)
         if use_scheduler:
             scheduler.step(epoch)
         if use_hyper_scheduler:
@@ -198,13 +192,8 @@ def experiment(args, device):
             tqdm.write('epoch: {:d} | val loss: {:6.4f} | val acc: {:6.4f} | test loss: {:6.4f} | test_acc: {:6.4f}'.format(
                 epoch, val_loss, val_acc, test_loss, test_acc))
 
-            csv_logger.writerow({'epoch': str(epoch),
-                                 'train_loss': str(train_loss), 'train_acc': str(accuracy),
-                                 'val_loss': str(val_loss), 'val_acc': str(val_acc),
-                                 'test_loss': str(test_loss), 'test_acc': str(test_acc),
-                                 'hypergradient_cos_diff': hypergradient_cos_diff,
-                                 'hypergradient_l2_diff': hypergradient_l2_diff,
-                                 'run_time': time.time() - init_time, 'iteration': iteration})
+            csv_logger.writerow(epoch, train_loss, accuracy, val_loss, val_acc, test_loss, test_acc,
+                                hypergradient_cos_diff, hypergradient_l2_diff, time.time() - init_time, iteration)
         elif args.do_print:
             val_loss, val_acc = test(val_loader, args, model, augment_net, device, do_test_augment=False)
             tqdm.write('val loss: {:6.4f} | val acc: {:6.4f}'.format(val_loss, val_acc))

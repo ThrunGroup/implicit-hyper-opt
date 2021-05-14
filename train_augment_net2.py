@@ -12,7 +12,8 @@ import torch
 # Local imports
 from augment_net_experiment import experiment
 from constants import DATASET_BOSTON, DATASET_MNIST, DATASET_CIFAR_100, DATASET_CIFAR_10, MODEL_RESNET18, \
-    MODEL_WIDERESNET, MODEL_MLP, MODEL_CNN_MLP
+    MODEL_WIDERESNET, MODEL_MLP, MODEL_CNN_MLP, HYPERPARAM_WEIGHT_DECAY, HYPERPARAM_WEIGHT_DECAY_GLOBAL, \
+    HYPERPARAM_DATA_AUGMENT, HYPERPARAM_LOSS_REWEIGHT
 from finetune_hyperparameters import FinetuneHyperparameters
 from train_augment_net_multiple import get_id
 
@@ -28,7 +29,7 @@ class AugmentNetTrainer(object):
                  num_finetune_epochs=200,
                  lr=0.1):
         self.seeds = seeds or [1]
-        self.hyperparams = hyperparams or ['dataAugment']
+        self.hyperparams = hyperparams or [HYPERPARAM_DATA_AUGMENT]
         self.data_sizes = data_sizes or [100, 200, 1600]
         self.val_props = val_props or [.1, .25, .5, .75, .9]
         self.datasets = datasets or ['mnist']
@@ -113,14 +114,14 @@ class AugmentNetTrainer(object):
         use_reweighting_net = False
         use_augment_net = False
 
-        if hyperparam == 'weightDecayParams':
+        if hyperparam == HYPERPARAM_WEIGHT_DECAY:
             use_weight_decay = True
             weight_decay_all = True
-        elif hyperparam == 'weightDecayGlobal':
+        elif hyperparam == HYPERPARAM_WEIGHT_DECAY_GLOBAL:
             use_weight_decay = True
-        elif hyperparam == 'dataAugment':
+        elif hyperparam == HYPERPARAM_DATA_AUGMENT:
             use_augment_net = True
-        elif hyperparam == 'lossReweight':
+        elif hyperparam == HYPERPARAM_LOSS_REWEIGHT:
             use_reweighting_net = True
 
         test_args = FinetuneHyperparameters()
@@ -217,7 +218,8 @@ class AugmentNetTrainer(object):
             y_axis += '_re'
 
         for data_size in self.data_sizes[::-1]:
-            if data_size in exclude_sizes: continue
+            if data_size in exclude_sizes:
+                continue
             color = None
             for i, hyperparam in enumerate(self.hyperparams):
                 data_to_graph = []
@@ -232,10 +234,10 @@ class AugmentNetTrainer(object):
                     data_to_graph += [data_for_seed[y_axis]]
 
                 label = 'Size:' + str(data_size)
-                if hyperparam == 'weightDecayParams' and data_size == self.data_sizes[0]:
+                if hyperparam == HYPERPARAM_WEIGHT_DECAY and data_size == self.data_sizes[0]:
                     hyperlabel = 'WD per weight'
                     label += ',Hyper:' + hyperlabel
-                elif hyperparam == 'weightDecayGlobal' and data_size == self.data_sizes[0]:
+                elif hyperparam == HYPERPARAM_WEIGHT_DECAY_GLOBAL and data_size == self.data_sizes[0]:
                     hyperlabel = hyperparam
                     hyperlabel = 'Global WD'
                     label += ',Hyper:' + hyperlabel  # + ',Data:' + dataset
@@ -266,7 +268,8 @@ class AugmentNetTrainer(object):
 
         np.clip(np.round(np.array(self.val_props) * data_size), 1, 10e32)
         for data_size in self.data_sizes:
-            if data_size in exclude_sizes: continue
+            if data_size in exclude_sizes:
+                continue
             color = None
             for i, hyperparam in enumerate(self.hyperparams):
                 data_to_graph = []
@@ -307,14 +310,14 @@ class AugmentNetTrainer(object):
         use_reweighting_net = False
         use_augment_net = False
 
-        if hyperparam == 'weightDecayParams':
+        if hyperparam == HYPERPARAM_WEIGHT_DECAY:
             use_weight_decay = True
             weight_decay_all = True
-        elif hyperparam == 'weightDecayGlobal':
+        elif hyperparam == HYPERPARAM_WEIGHT_DECAY_GLOBAL:
             use_weight_decay = True
-        elif hyperparam == 'dataAugment':
+        elif hyperparam == HYPERPARAM_DATA_AUGMENT:
             use_augment_net = True
-        elif hyperparam == 'lossReweight':
+        elif hyperparam == HYPERPARAM_LOSS_REWEIGHT:
             use_reweighting_net = True
 
         test_args = FinetuneHyperparameters()
@@ -347,7 +350,7 @@ class AugmentNetTrainer(object):
 
     def multi_boston_args(self):
         num_neumanns = [10, 20, 5, 1, 0]
-        hyperparams = ['weightDecayParams']  # , 'weightDecayGlobal']
+        hyperparams = [HYPERPARAM_WEIGHT_DECAY]  # , HYPERPARAM_WEIGHT_DECAY_GLOBAL]
         num_layers = [0]  # , 1]
         argss = []
         for num_neumann in num_neumanns:
@@ -363,7 +366,7 @@ class AugmentNetTrainer(object):
 
     def multi_boston_how_many_steps(self):
         num_neumanns = range(50)  # [0, 1, 20]
-        hyperparams = ['weightDecayParams']  # , 'weightDecayGlobal']
+        hyperparams = [HYPERPARAM_WEIGHT_DECAY]  # , HYPERPARAM_WEIGHT_DECAY_GLOBAL]
         num_layers = [0]  # , 1]
         argss = []
         for num_neumann in num_neumanns:
@@ -386,9 +389,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="PyTorch Data Augmentation Example")
     parser.add_argument('--seeds', type=int, default=[1], metavar='S', nargs='+',
                         help='Random seed list (default: [1])')
-    parser.add_argument('--hyperparams', type=str, default=['dataAugment'], metavar='H', nargs='+',
-                        choices=['weightDecayParams', 'weightDecayGlobal', 'dataAugment', 'lossReweight'],
-                        help='Hyperparameter list (default: [dataAugment])')
+    parser.add_argument('--hyperparams', type=str, default=[HYPERPARAM_DATA_AUGMENT], metavar='H', nargs='+',
+                        choices=[HYPERPARAM_WEIGHT_DECAY, HYPERPARAM_WEIGHT_DECAY_GLOBAL, HYPERPARAM_DATA_AUGMENT, HYPERPARAM_LOSS_REWEIGHT],
+                        help=f"Hyperparameter list (default: [{HYPERPARAM_DATA_AUGMENT}])")
     parser.add_argument('--data-sizes', type=int, default=[50000], metavar='DSZ', nargs='+',
                         help='Data size list (default: [50000])')
     parser.add_argument('--val-props', type=float, default=[0.1], metavar='VP', nargs='+',
@@ -413,7 +416,7 @@ if __name__ == '__main__':
 
     '''
     seeds = [1, 2, 3]
-    hyperparams = ['weightDecayParams', 'weightDecayGlobal']
+    hyperparams = [HYPERPARAM_WEIGHT_DECAY, HYPERPARAM_WEIGHT_DECAY_GLOBAL]
     data_sizes = [50, 100, 250, 500, 1000]  # TODO: Generalize to other variables - ex. hyper choice
     val_props = [.0, .1, .25, .5, .75, .9]
     '''
