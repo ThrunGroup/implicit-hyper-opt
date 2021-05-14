@@ -14,7 +14,8 @@ from augment_net_experiment import experiment
 from constants import DATASET_BOSTON, DATASET_MNIST, DATASET_CIFAR_100, DATASET_CIFAR_10, MODEL_RESNET18, \
     MODEL_WIDERESNET, MODEL_MLP, MODEL_CNN_MLP, HYPERPARAM_WEIGHT_DECAY, HYPERPARAM_WEIGHT_DECAY_GLOBAL, \
     HYPERPARAM_DATA_AUGMENT, HYPERPARAM_LOSS_REWEIGHT
-from finetune_hyperparameters import FinetuneHyperparameters
+from finetune_hyperparameters import make_val_size_compare_finetune_params, \
+    make_boston_dataset_finetune_params
 from train_augment_net_multiple import get_id
 
 
@@ -53,106 +54,6 @@ class AugmentNetTrainer(object):
             self.graph_val_prop_compare(dataset, exclude_sizes=exclude_sizes, do_legend=False, fontsize=fontsize)
             self.graph_val_prop_compare(dataset, exclude_sizes=exclude_sizes, retrain=True, do_legend=True, fontsize=fontsize)
 
-    def make_test_arg(self):
-        '''
-        Instantiates a set of arguments for a test experiment
-        '''
-
-        test_args = FinetuneHyperparameters()
-        test_args.update_hyperparameters({
-            'reg_weight': .5,
-            'num_neumann_terms': 1,
-            'use_cg': False,
-            'seed': 3333,
-            'do_diagnostic': True,
-            'data_augmentation': True,
-            'use_reweighting_net': False,
-            'use_augment_net': True,
-            'use_weight_decay': False,
-            'num_finetune_epochs': self.num_finetune_epochs,
-            'lr': self.lr,
-        })
-        return test_args
-
-    def make_inverse_compare_arg(self):
-        test_args = FinetuneHyperparameters()
-        test_args.update_hyperparameters({
-            'reg_weight': 1.0,
-            'seed': 8888,
-            'do_diagnostic': True,
-            'data_augmentation': True,
-            'use_reweighting_net': False,
-            'use_augment_net': True,
-            'batch_size': 50,
-            'train_size': 50,
-            'val_size': 1000,
-            'test_size': 100,
-            'num_finetune_epochs': self.num_finetune_epochs,
-            'model': 'resnet18',            # 'resnet18', 'mlp'
-            'use_weight_decay': False,      # TODO: Add weight_decay to saveinfo?
-            'dataset': 'mnist',             # 'mnist', 'cifar10'  # TODO: Need to add dataset to the save info?
-            'num_neumann_terms': -1,
-            'use_cg': False,
-            'lr': self.lr,
-        })
-        return test_args
-
-
-    def make_val_size_compare(self, hyperparam, val_prop, data_size, dataset, model):
-        '''
-        Not sure
-        '''
-        assert 0 <= val_prop <= 1.0, 'Train proportion in [0, 1]'
-
-        train_size = int(data_size * (1.0 - val_prop))
-        train_size = 1 if train_size <= 0 else train_size
-        val_size = int(data_size * val_prop)
-        val_size = 1 if val_size <= 0 else val_size
-
-        use_weight_decay = False
-        weight_decay_all = False
-        use_reweighting_net = False
-        use_augment_net = False
-
-        if hyperparam == HYPERPARAM_WEIGHT_DECAY:
-            use_weight_decay = True
-            weight_decay_all = True
-        elif hyperparam == HYPERPARAM_WEIGHT_DECAY_GLOBAL:
-            use_weight_decay = True
-        elif hyperparam == HYPERPARAM_DATA_AUGMENT:
-            use_augment_net = True
-        elif hyperparam == HYPERPARAM_LOSS_REWEIGHT:
-            use_reweighting_net = True
-
-        test_args = FinetuneHyperparameters()
-        test_args.update_hyperparameters({
-            'reg_weight': 0.0,
-            'seed': 1,
-            'data_augmentation': False,
-            'batch_size': data_size,    # TODO: Do i want a variable batch size?
-            'val_prop': val_prop,
-            'train_size': train_size,
-            'val_size': val_size,
-            'test_size': -1,            # TODO: For long running, boost test_size and num_epochs
-            'num_finetune_epochs': self.num_finetune_epochs,
-            'model': model,
-            'use_weight_decay': use_weight_decay,
-            'weight_decay_all': weight_decay_all,
-            'use_reweighting_net': use_reweighting_net,
-            'use_augment_net': use_augment_net,
-            'dataset': dataset,         # 'mnist', 'cifar10'  # TODO: Need to add dataset to the save info?
-            'do_simple': True,
-            'do_diagnostic': False,
-            'do_print': False,
-            'num_neumann_terms': -1 if val_size == 1 else 3,
-            'use_cg': False,
-            'only_print_final_vals': False,
-            'load_finetune_checkpoint': '',
-            'lr': self.lr,
-        })
-        return test_args
-
-
     def run_val_prop_compare(self):
         # TODO (@Mo): Use itertools' product
         for seed in self.seeds:
@@ -164,7 +65,7 @@ class AugmentNetTrainer(object):
                                         'info': ''}
                         for val_prop in self.val_props:
                             print(f"seed:{seed}, dataset:{dataset}, hyperparam:{hyperparam}, data_size:{data_size}, prop:{val_prop}")
-                            args = self.make_val_size_compare(hyperparam, val_prop, data_size, dataset, self.model)
+                            args = make_val_size_compare_finetune_params(hyperparam, val_prop, data_size, dataset, self.model, self.num_finetune_epochs, self.lr)
                             args.seed = seed
                             train_loss, accuracy, val_loss, val_acc, test_loss, test_acc = experiment(args, self.device)
                             data_to_save['val_losses'] += [val_loss]
@@ -172,7 +73,7 @@ class AugmentNetTrainer(object):
                             data_to_save['test_losses'] += [test_loss]
                             data_to_save['test_accs'] += [test_acc]
 
-                            second_args = self.make_val_size_compare(hyperparam, 0, data_size, dataset)
+                            second_args = make_val_size_compare_finetune_params(hyperparam, 0, data_size, dataset, self.model, self.num_finetune_epochs, self.lr)
                             second_args.seed = seed
                             second_args.num_neumann_terms = -1
                             loc = '/sailhome/motiwari/data-augmentation/implicit-hyper-opt/CG_IFT_test/finetuned_checkpoints/'
@@ -302,52 +203,6 @@ class AugmentNetTrainer(object):
         plt.savefig(f"images/valNum_vs_testAcc_for_{dataset}{retrain_title}.pdf")
         plt.clf()
 
-
-    # TODO: Make a function to create multiple args to deploy
-    def do_boston(self, hyperparam, num_layer, num_neumann):
-        use_weight_decay = False
-        weight_decay_all = False
-        use_reweighting_net = False
-        use_augment_net = False
-
-        if hyperparam == HYPERPARAM_WEIGHT_DECAY:
-            use_weight_decay = True
-            weight_decay_all = True
-        elif hyperparam == HYPERPARAM_WEIGHT_DECAY_GLOBAL:
-            use_weight_decay = True
-        elif hyperparam == HYPERPARAM_DATA_AUGMENT:
-            use_augment_net = True
-        elif hyperparam == HYPERPARAM_LOSS_REWEIGHT:
-            use_reweighting_net = True
-
-        test_args = FinetuneHyperparameters()
-        test_args.update_hyperparameters({
-            'reg_weight': 0.0,
-            'seed': 1,
-            'data_augmentation': False,
-            'batch_size': 128 * 4,
-            'model': 'mlp' + str(num_layer),    # 'resnet18', 'mlp'
-            'use_weight_decay': use_weight_decay,
-            'weight_decay_all': weight_decay_all,
-            'use_reweighting_net': use_reweighting_net,
-            'use_augment_net': use_augment_net,
-            'num_layers': num_layer,
-            'dataset': 'boston',
-            'do_classification': False,
-            'do_simple': True,
-            'do_diagnostic': False,
-            'do_print': True,
-            'num_neumann_terms': num_neumann,
-            'use_cg': False,
-            'warmup_epochs': 200,
-            'num_finetune_epochs': self.num_finetune_epochs,
-            'do_inverse_compare': True,
-            'save_hessian': False,
-            'lr': self.lr,
-        })
-        return test_args
-
-
     def multi_boston_args(self):
         num_neumanns = [10, 20, 5, 1, 0]
         hyperparams = [HYPERPARAM_WEIGHT_DECAY]  # , HYPERPARAM_WEIGHT_DECAY_GLOBAL]
@@ -356,13 +211,13 @@ class AugmentNetTrainer(object):
         for num_neumann in num_neumanns:
             for hyperparam in hyperparams:
                 for num_layer in num_layers:
-                    args = self.do_boston(hyperparam, num_layer, num_neumann)
+                    args = make_boston_dataset_finetune_params(hyperparam, num_layer, num_neumann,
+                                                               self.num_finetune_epochs, self.lr)
                     if num_neumann == 10:
                         args.use_cg = True
                         args.num_neumann_terms = 20
                     argss += [args]
         return argss
-
 
     def multi_boston_how_many_steps(self):
         num_neumanns = range(50)  # [0, 1, 20]
@@ -372,7 +227,8 @@ class AugmentNetTrainer(object):
         for num_neumann in num_neumanns:
             for hyperparam in hyperparams:
                 for num_layer in num_layers:
-                    args = self.do_boston(hyperparam, num_layer, num_neumann)
+                    args = make_boston_dataset_finetune_params(hyperparam, num_layer, num_neumann,
+                                                               self.num_finetune_epochs, self.lr)
                     # args.warmup_epochs = 200
                     # args.num_finetune_epochs = args.warmup_epochs + 40
                     argss += [args]
@@ -410,8 +266,8 @@ def parse_args():
 
 
 if __name__ == '__main__':
-    # experiment(make_test_arg())
-    # experiment(make_inverse_compare_arg())
+    # experiment(make_test_finetune_params())
+    # experiment(make_inverse_compare_finetune_params())
     # experiment(make_val_size_compare(0.5, 100))
 
     '''
