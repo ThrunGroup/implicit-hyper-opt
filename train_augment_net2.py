@@ -45,7 +45,6 @@ from train_augment_net_multiple import make_argss
 
 
 class AugmentNetTrainer(object):
-
     def __init__(self,
                  seeds=None,
                  hyperparams=None,
@@ -383,23 +382,6 @@ class AugmentNetTrainer(object):
 
 
     def experiment(self, args):
-        if args.do_print:
-            print(args)
-
-        torch.manual_seed(args.seed)
-        np.random.seed(args.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(args.seed)
-
-        # Load the baseline model
-        args.load_baseline_checkpoint = None  # '/h/lorraine/PycharmProjects/CG_IFT_test/baseline_checkpoints/cifar10_resnet18_sgdm_lr0.1_wd0.0005_aug1.pt'
-        args.load_finetune_checkpoint = ''  # TODO: Make it load the augment net if this is provided
-        model, train_loader, val_loader, test_loader, augment_net, reweighting_net, checkpoint = self.get_models(args)
-
-        # Load the logger
-        csv_logger, test_id = load_logger(args)
-        args.save_loc = './finetuned_checkpoints/' + get_id(args)
-
         # Hyperparameter access functions
         def get_hyper_train():
             # return torch.cat([p.view(-1) for p in augment_net.parameters()])
@@ -423,33 +405,8 @@ class AugmentNetTrainer(object):
             elif args.use_weight_decay:
                 return model.weight_decay  # TODO: This correct?
 
-        # Setup the optimizers
-        if args.load_baseline_checkpoint is not None:
-            args.lr = args.lr * 0.2 * 0.2 * 0.2
-        if args.use_weight_decay:
-            # optimizer = optim.Adam(model.parameters(), lr=1e-3)
-            args.wdecay = 0
-
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, nesterov=True, weight_decay=args.wdecay)
-        if args.dataset == 'boston':
-            optimizer = optim.Adam(model.parameters())
-        use_scheduler = False
-        if not args.do_simple:
-            use_scheduler = True
-        scheduler = MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)  # [60, 120, 160]
-        # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-
-        use_hyper_scheduler = False
-        hyper_optimizer = optim.RMSprop(get_hyper_train())
-        if not args.do_simple:
-            hyper_optimizer = optim.SGD(get_hyper_train(), lr=args.lr, momentum=0.9, nesterov=True)
-            use_hyper_scheduler = True
-        hyper_scheduler = MultiStepLR(hyper_optimizer, milestones=[40, 100, 140], gamma=0.2)
-
-        graph_iter = 0
-
         def train_loss_func(x, y):
-            x, y = x.to(f'cuda:{model.device_ids[0]}'), y.to(f'cuda:{model.device_ids[0]}')
+            x, y = x.cuda(), y.cuda()
             reg = 0.
 
             if args.use_augment_net and (args.num_neumann_terms >= 0 or args.load_finetune_checkpoint != ''):
@@ -505,12 +462,6 @@ class AugmentNetTrainer(object):
             # print(f"reg: {reg}, mean_hyper: {torch.mean(get_hyper_train()[0])}")
             final_loss = xentropy_loss.mean() + reg
             return final_loss, pred
-
-        use_reg = args.use_augment_net and not args.use_reweighting_net
-        reg_anneal_epoch = 0
-        stop_reg_epoch = 200
-        if args.reg_weight == 0:
-            use_reg = False
 
         def val_loss_func(x, y):
             x, y = x.to(self.device), y.to(self.device)
@@ -708,6 +659,55 @@ class AugmentNetTrainer(object):
             # get_hyper_train()[0].grad = hypergrad
             return val_loss, hypergrad.norm()
 
+
+        if args.do_print:
+            print(args)
+
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(args.seed)
+
+        # Load the baseline model
+        args.load_baseline_checkpoint = None  # '/h/lorraine/PycharmProjects/CG_IFT_test/baseline_checkpoints/cifar10_resnet18_sgdm_lr0.1_wd0.0005_aug1.pt'
+        args.load_finetune_checkpoint = ''  # TODO: Make it load the augment net if this is provided
+        model, train_loader, val_loader, test_loader, augment_net, reweighting_net, checkpoint = self.get_models(args)
+
+        # Load the logger
+        csv_logger, test_id = load_logger(args)
+        args.save_loc = './finetuned_checkpoints/' + get_id(args)
+
+
+        # Setup the optimizers
+        if args.load_baseline_checkpoint is not None:
+            args.lr = args.lr * 0.2 * 0.2 * 0.2
+        if args.use_weight_decay:
+            # optimizer = optim.Adam(model.parameters(), lr=1e-3)
+            args.wdecay = 0
+
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, nesterov=True, weight_decay=args.wdecay)
+        if args.dataset == 'boston':
+            optimizer = optim.Adam(model.parameters())
+        use_scheduler = False
+        if not args.do_simple:
+            use_scheduler = True
+        scheduler = MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)  # [60, 120, 160]
+        # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        use_hyper_scheduler = False
+        hyper_optimizer = optim.RMSprop(get_hyper_train())
+        if not args.do_simple:
+            hyper_optimizer = optim.SGD(get_hyper_train(), lr=args.lr, momentum=0.9, nesterov=True)
+            use_hyper_scheduler = True
+        hyper_scheduler = MultiStepLR(hyper_optimizer, milestones=[40, 100, 140], gamma=0.2)
+
+        graph_iter = 0
+        use_reg = args.use_augment_net and not args.use_reweighting_net
+        reg_anneal_epoch = 0
+        stop_reg_epoch = 200
+        if args.reg_weight == 0:
+            use_reg = False
+
         init_time = time.time()
         val_loss, val_acc = test(val_loader)
         test_loss, test_acc = test(test_loader)
@@ -827,6 +827,7 @@ class AugmentNetTrainer(object):
             train_loss = xentropy_loss_avg / (i + 1)
 
             if not args.only_print_final_vals:
+                import ipdb; ipdb.set_trace()
                 val_loss, val_acc = test(val_loader)
                 # if val_acc >= 0.99 and accuracy >= 0.99 and epoch >= 50: break
                 test_loss, test_acc = test(test_loader)
@@ -840,10 +841,10 @@ class AugmentNetTrainer(object):
                                      'hypergradient_cos_diff': hypergradient_cos_diff,
                                      'hypergradient_l2_diff': hypergradient_l2_diff,
                                      'run_time': time.time() - init_time, 'iteration': iteration})
-            else:
-                if args.do_print:
-                    val_loss, val_acc = test(val_loader, do_test_augment=False)
-                    tqdm.write('val loss: {:6.4f} | val acc: {:6.4f}'.format(val_loss, val_acc))
+            elif args.do_print:
+                val_loss, val_acc = test(val_loader, do_test_augment=False)
+                tqdm.write('val loss: {:6.4f} | val acc: {:6.4f}'.format(val_loss, val_acc))
+
         val_loss, val_acc = test(val_loader)
         test_loss, test_acc = test(test_loader)
         self.saver(args.num_finetune_epochs, model, optimizer, augment_net, reweighting_net, hyper_optimizer, args.save_loc)
@@ -868,7 +869,6 @@ class AugmentNetTrainer(object):
             'use_weight_decay': False
         })
         return test_args
-
 
     def make_inverse_compare_arg(self):
         test_args = FinetuneHyperparameters()
@@ -943,7 +943,6 @@ class AugmentNetTrainer(object):
             'use_cg': False,
             'only_print_final_vals': False,
             'load_finetune_checkpoint': '',
-
         })
         return test_args
 
@@ -1185,7 +1184,7 @@ def parse_args():
     parser.add_argument('--hyperparams', type=str, default=['dataAugment'], metavar='H', nargs='+',
                         choices=['weightDecayParams', 'weightDecayGlobal', 'dataAugment', 'lossReweight'],
                         help='Hyperparameter list (default: [dataAugment])')
-    parser.add_argument('--data-sizes', type=int, default=[50000], metavar='DSZ', nargs='+',
+    parser.add_argument('--data-sizes', type=int, default=[100], metavar='DSZ', nargs='+',
                         help='Data size list (default: [50000])')
     parser.add_argument('--val-props', type=float, default=[0.1], metavar='VP', nargs='+',
                         help='Validation proportion list (default: [0.1])')
