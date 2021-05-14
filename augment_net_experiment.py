@@ -100,7 +100,7 @@ def experiment(args, device):
             images, labels = images.to(device), labels.to(device)
             # pred = model(images)
             optimizer.zero_grad()  # TODO: ADDED
-            xentropy_loss, pred, graph_iter = train_loss_func(images, labels, args, model, augment_net, reweighting_net, graph_iter)  # F.cross_entropy(pred, labels)
+            xentropy_loss, pred, graph_iter = train_loss_func(images, labels, args, model, augment_net, reweighting_net, graph_iter, device)  # F.cross_entropy(pred, labels)
             xentropy_loss.backward()  # TODO: ADDED
             optimizer.step()  # TODO: ADDED
             optimizer.zero_grad()  # TODO: ADDED
@@ -236,8 +236,8 @@ def get_hyper_train_flat(args, model, augment_net, reweighting_net):
         return model.weight_decay  # TODO: This correct?
 
 
-def train_loss_func(x, y, args, model, augment_net, reweighting_net, graph_iter):
-    x, y = x.cuda(), y.cuda()
+def train_loss_func(x, y, args, model, augment_net, reweighting_net, graph_iter, device):
+    x, y = x.to(device), y.to(device)
     reg = 0.
 
     if args.use_augment_net and (args.num_neumann_terms >= 0 or args.load_finetune_checkpoint != ''):
@@ -379,7 +379,7 @@ def hyper_step(elementary_lr, args, model, train_loader, val_loader, augment_net
     d_train_loss_d_w = torch.zeros(num_weights).to(device)
     model.train(), model.zero_grad()
     for batch_idx, (x, y) in enumerate(train_loader):
-        train_loss, _, graph_iter = train_loss_func(x, y, args, model, augment_net, reweighting_net, graph_iter)
+        train_loss, _, graph_iter = train_loss_func(x, y, args, model, augment_net, reweighting_net, graph_iter, device)
         optimizer.zero_grad()
         d_train_loss_d_w += gather_flat_grad(grad(train_loss, model.parameters(), create_graph=True))
         break # TODO (@Mo): Huh?
