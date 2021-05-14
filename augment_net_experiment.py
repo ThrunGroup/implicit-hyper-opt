@@ -6,7 +6,7 @@ import torch.optim as optim
 
 from constants import DATASET_BOSTON
 from data_loaders import DataLoaders
-from hyper_train import get_hyper_train, train_loss_func, hyper_step, get_hyper_train_flat
+from hyper_optimizer import get_hyper_train, train_loss_func, hyper_step, get_hyper_train_flat
 from train_augment_net_graph import save_images
 from train_augment_net_multiple import load_logger, get_id
 from torch.optim.lr_scheduler import MultiStepLR
