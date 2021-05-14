@@ -21,7 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import grad
 from torch.autograd import Variable
-from torch.optim.lr_scheduler import MultiStepLR
+from torch.optim.lr_scheduler import MultiStepLR, StepLR
 
 
 # Local imports
@@ -53,7 +53,9 @@ class AugmentNetTrainer(object):
                  datasets=None,
                  model=None,
                  num_finetune_epochs=200,
-                 lr=0.1):
+                 lr=0.1,
+                 hyper_lr = 0.1,
+                 ):
         self.seeds = seeds or [1]
         self.hyperparams = hyperparams or ['dataAugment']
         self.data_sizes = data_sizes or [100, 200, 1600]
@@ -62,6 +64,7 @@ class AugmentNetTrainer(object):
         self.model = model or 'cnn_mlp'
         self.num_finetune_epochs = num_finetune_epochs
         self.lr = lr
+        self.hyper_lr = hyper_lr
 
         if torch.cuda.is_available():
             print("GPU is available to use in this machine. Using", torch.cuda.device_count(), "GPUs...")
@@ -680,7 +683,6 @@ class AugmentNetTrainer(object):
         csv_logger, test_id = load_logger(args)
         args.save_loc = './finetuned_checkpoints/' + get_id(args)
 
-
         # Setup the optimizers
         if args.load_baseline_checkpoint is not None:
             args.lr = args.lr * 0.2 * 0.2 * 0.2 # TODO (@Mo): oh my god no
@@ -688,22 +690,22 @@ class AugmentNetTrainer(object):
             # optimizer = optim.Adam(model.parameters(), lr=1e-3)
             args.wdecay = 0
 
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, nesterov=True, weight_decay=args.wdecay)
+        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wdecay) #momentum = 0.9, nesterov = True
         if args.dataset == 'boston':
             optimizer = optim.Adam(model.parameters())
-        use_scheduler = False
         if not args.do_simple:
             use_scheduler = True
+        use_scheduler = False
         scheduler = MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)  # [60, 120, 160]
         # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-        use_hyper_scheduler = False
-        hyper_optimizer = optim.RMSprop(get_hyper_train())
-        if not args.do_simple:
-            hyper_optimizer = optim.SGD(get_hyper_train(), lr=args.lr, momentum=0.9, nesterov=True)
-            use_hyper_scheduler = True
-        hyper_scheduler = MultiStepLR(hyper_optimizer, milestones=[40, 100, 140], gamma=0.2)
-
+        # use_hyper_scheduler = False
+        # hyper_optimizer = optim.RMSprop(get_hyper_train())
+        # if not args.do_simple:
+        # hyper_scheduler = MultiStepLR(hyper_optimizer, milestones=[30, 60, 90, 120, 150], gamma=0.1)
+        hyper_optimizer = optim.RMSprop(get_hyper_train(), lr=args.hyper_lr, momentum=0.9) #nesterov = True
+        use_hyper_scheduler = True
+        hyper_scheduler = optim.lr_scheduler.StepLR(hyper_optimizer, step_size = 75, gamma = 0.3)
         graph_iter = 0
         use_reg = args.use_augment_net and not args.use_reweighting_net
         reg_anneal_epoch = 0
@@ -828,6 +830,8 @@ class AugmentNetTrainer(object):
             if use_hyper_scheduler:
                 hyper_scheduler.step(epoch)
             train_loss = xentropy_loss_avg / (i + 1)
+            print(hyper_scheduler.__dict__)
+            print(list(augment_net.parameters())[-1])
 
             if not args.only_print_final_vals:
                 val_loss, val_acc = test(val_loader)
@@ -950,6 +954,7 @@ class AugmentNetTrainer(object):
             'only_print_final_vals': False,
             'load_finetune_checkpoint': '',
             'lr': self.lr,
+            'hyper_lr' : self.hyper_lr,
         })
         return test_args
 
@@ -1193,18 +1198,20 @@ def parse_args():
                         help='Hyperparameter list (default: [dataAugment])')
     parser.add_argument('--data-sizes', type=int, default=[50000], metavar='DSZ', nargs='+',
                         help='Data size list (default: [50000])')
-    parser.add_argument('--val-props', type=float, default=[0.1], metavar='VP', nargs='+',
-                        help='Validation proportion list (default: [0.1])')
+    parser.add_argument('--val-props', type=float, default=[0.5], metavar='VP', nargs='+',
+                        help='Validation proportion list (default: [0.5])')
     parser.add_argument('--datasets', type=str, default=['mnist'], metavar='DS', nargs='+',
                         choices=['cifar10', 'cifar100', 'mnist', 'boston'],
                         help='Choose dataset list (default: [mnist])')
     parser.add_argument('--model', type=str, default='mlp', metavar='M',
                         choices=['resnet18', 'wideresnet', 'mlp', 'cnn_mlp'],
                         help='Choose a model (default: mlp)')
-    parser.add_argument('--num-finetune-epochs', type=int, default=200, metavar='NFE',
-                        help='Number of fine-tuning epochs (default: 200)')
-    parser.add_argument('--lr', type=int, default=0.1, metavar='LR',
-                        help='Learning rate (default: 0.1)')
+    parser.add_argument('--num-finetune-epochs', type=int, default=1000, metavar='NFE',
+                        help='Number of fine-tuning epochs (default: 1000)')
+    parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
+                        help='Learning rate (default: 0.01)')
+    parser.add_argument('--hyper_lr', type=float, default=0.01, metavar='HYPERLR',
+                        help='Hyperparameter learning rate (default: 0.01)')
     return parser.parse_args()
 
 
@@ -1232,7 +1239,9 @@ if __name__ == '__main__':
                                             datasets=args.datasets,
                                             model=args.model,
                                             num_finetune_epochs=args.num_finetune_epochs,
-                                            lr=args.lr)
+                                            lr=args.lr,
+                                            hyper_lr=args.hyper_lr,
+                                            )
     augment_net_trainer.process()
 
     '''
