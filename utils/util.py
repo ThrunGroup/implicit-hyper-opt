@@ -1,6 +1,6 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy
-
 import torch
 from torch.autograd import grad
 from torch.autograd import Variable
@@ -247,3 +247,25 @@ def save_models(epoch, elementary_model, elementary_optimizer, augment_net, rewe
             'reweighting_net_state_dict': reweighting_net.state_dict(),
             'hyper_optimizer_state_dict': hyper_optimizer.state_dict()
         }, path + '/checkpoint.pt')
+
+
+def save_hessian(hessian, name):
+    print("saving...")
+    fig = plt.figure()
+    # clamp_min, clamp_max = -5.0, 5.0
+    hessian = torch.tanh(hessian)  # torch.clamp(hessian, clamp_min, clamp_max)
+    # hessian[hessian < -1e-4] = clamp_min
+    # hessian[hessian > 1e-4] = clamp_max
+    # hessian = torch.log(torch.abs(hessian))#torch.clamp(hessian, -1e1, 1e1)
+    # hessian[hessian == hessian] = torch.clamp(hessian[hessian == hessian], -10, 10)
+    # hessian[torch.abs(hessian) < 1e-0] = 0
+    data = hessian.detach().cpu().numpy()
+    im = plt.imshow(data, cmap='bwr', interpolation='none', vmin=-1, vmax=1)
+    # plt.title(f"Ground Truth: {i}", fontsize=4)
+    plt.xticks([])
+    plt.yticks([])
+    plt.draw()
+    cbar = plt.colorbar(im)
+    cbar.ax.tick_params(labelsize=20)
+    fig.savefig('images/hessian_' + str(name) + '.pdf')
+    plt.close(fig)
