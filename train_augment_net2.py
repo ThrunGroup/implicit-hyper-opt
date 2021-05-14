@@ -22,13 +22,17 @@ class AugmentNetTrainer(object):
                  data_sizes=None,
                  val_props=None,
                  datasets=None,
-                 model=None):
+                 model=None,
+                 num_finetune_epochs=200,
+                 lr=0.1):
         self.seeds = seeds or [1]
         self.hyperparams = hyperparams or ['dataAugment']
         self.data_sizes = data_sizes or [100, 200, 1600]
         self.val_props = val_props or [.1, .25, .5, .75, .9]
         self.datasets = datasets or ['mnist']
         self.model = model or 'cnn_mlp'
+        self.num_finetune_epochs = num_finetune_epochs
+        self.lr = lr
 
         if torch.cuda.is_available():
             print("GPU is available to use in this machine. Using", torch.cuda.device_count(), "GPUs...")
@@ -61,7 +65,9 @@ class AugmentNetTrainer(object):
             'data_augmentation': True,
             'use_reweighting_net': False,
             'use_augment_net': True,
-            'use_weight_decay': False
+            'use_weight_decay': False,
+            'num_finetune_epochs': self.num_finetune_epochs,
+            'lr': self.lr,
         })
         return test_args
 
@@ -78,12 +84,13 @@ class AugmentNetTrainer(object):
             'train_size': 50,
             'val_size': 1000,
             'test_size': 100,
-            'num_finetune_epochs': 10000,
+            'num_finetune_epochs': self.num_finetune_epochs,
             'model': 'resnet18',            # 'resnet18', 'mlp'
             'use_weight_decay': False,      # TODO: Add weight_decay to saveinfo?
             'dataset': 'mnist',             # 'mnist', 'cifar10'  # TODO: Need to add dataset to the save info?
             'num_neumann_terms': -1,
-            'use_cg': False
+            'use_cg': False,
+            'lr': self.lr,
         })
         return test_args
 
@@ -124,7 +131,7 @@ class AugmentNetTrainer(object):
             'train_size': train_size,
             'val_size': val_size,
             'test_size': -1,            # TODO: For long running, boost test_size and num_epochs
-            'num_finetune_epochs': 250,
+            'num_finetune_epochs': self.num_finetune_epochs,
             'model': model,
             'use_weight_decay': use_weight_decay,
             'weight_decay_all': weight_decay_all,
@@ -138,6 +145,7 @@ class AugmentNetTrainer(object):
             'use_cg': False,
             'only_print_final_vals': False,
             'load_finetune_checkpoint': '',
+            'lr': self.lr,
         })
         return test_args
 
@@ -327,9 +335,10 @@ class AugmentNetTrainer(object):
             'num_neumann_terms': num_neumann,
             'use_cg': False,
             'warmup_epochs': 200,
-            'num_finetune_epochs': 600,
+            'num_finetune_epochs': self.num_finetune_epochs,
             'do_inverse_compare': True,
-            'save_hessian': False
+            'save_hessian': False,
+            'lr': self.lr,
         })
         return test_args
 
@@ -385,9 +394,13 @@ def parse_args():
     parser.add_argument('--datasets', type=str, default=['mnist'], metavar='DS', nargs='+',
                         choices=['cifar10', 'cifar100', 'mnist', 'boston'],
                         help='Choose dataset list (default: [mnist])')
-    parser.add_argument('--model', type=str, default='cnn_mlp', metavar='M',
+    parser.add_argument('--model', type=str, default='mlp', metavar='M',
                         choices=['resnet18', 'wideresnet', 'mlp', 'cnn_mlp'],
-                        help='Choose a model (default: cnn_mlp)')
+                        help='Choose a model (default: mlp)')
+    parser.add_argument('--num-finetune-epochs', type=int, default=200, metavar='NFE',
+                        help='Number of fine-tuning epochs (default: 200)')
+    parser.add_argument('--lr', type=int, default=0.1, metavar='LR',
+                        help='Learning rate (default: 0.1)')
     return parser.parse_args()
 
 
@@ -413,7 +426,9 @@ if __name__ == '__main__':
                                             data_sizes=args.data_sizes,
                                             val_props=args.val_props,
                                             datasets=args.datasets,
-                                            model=args.model)
+                                            model=args.model,
+                                            num_finetune_epochs=args.num_finetune_epochs,
+                                            lr=args.lr)
     augment_net_trainer.process()
 
     '''
