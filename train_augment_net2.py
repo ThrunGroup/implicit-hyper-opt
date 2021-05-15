@@ -9,6 +9,7 @@ import numpy as np
 import pickle
 import torch
 
+
 # Local imports
 from augment_net_experiment import experiment
 from constants import DATASET_BOSTON, DATASET_MNIST, DATASET_CIFAR_100, DATASET_CIFAR_10, MODEL_RESNET18, \
@@ -28,7 +29,9 @@ class AugmentNetTrainer(object):
                  datasets=None,
                  model=None,
                  num_finetune_epochs=200,
-                 lr=0.1):
+                 lr=0.1,
+                 hyper_lr = 0.1,
+                 ):
         self.seeds = seeds or [1]
         self.hyperparams = hyperparams or [HYPERPARAM_DATA_AUGMENT]
         self.data_sizes = data_sizes or [100, 200, 1600]
@@ -37,6 +40,7 @@ class AugmentNetTrainer(object):
         self.model = model or 'cnn_mlp'
         self.num_finetune_epochs = num_finetune_epochs
         self.lr = lr
+        self.hyper_lr = hyper_lr
 
         if torch.cuda.is_available():
             print("GPU is available to use in this machine. Using", torch.cuda.device_count(), "GPUs...")
@@ -250,8 +254,8 @@ def parse_args():
                         help=f"Hyperparameter list (default: [{HYPERPARAM_DATA_AUGMENT}])")
     parser.add_argument('--data-sizes', type=int, default=[50000], metavar='DSZ', nargs='+',
                         help='Data size list (default: [50000])')
-    parser.add_argument('--val-props', type=float, default=[0.1], metavar='VP', nargs='+',
-                        help='Validation proportion list (default: [0.1])')
+    parser.add_argument('--val-props', type=float, default=[0.5], metavar='VP', nargs='+',
+                        help='Validation proportion list (default: [0.5])')
     parser.add_argument('--datasets', type=str, default=['mnist'], metavar='DS', nargs='+',
                         choices=[DATASET_CIFAR_10, DATASET_CIFAR_100, DATASET_MNIST, DATASET_BOSTON],
                         help=f"Choose dataset list (default: [{DATASET_MNIST}])")
@@ -262,6 +266,8 @@ def parse_args():
                         help='Number of fine-tuning epochs (default: 200)')
     parser.add_argument('--lr', type=int, default=0.1, metavar='LR',
                         help='Learning rate (default: 0.1)')
+    parser.add_argument('--hyper_lr', type=float, default=0.01, metavar='HYPERLR',
+                        help='Hyperparameter learning rate (default: 0.01)')
     return parser.parse_args()
 
 
@@ -289,7 +295,9 @@ if __name__ == '__main__':
                                             datasets=args.datasets,
                                             model=args.model,
                                             num_finetune_epochs=args.num_finetune_epochs,
-                                            lr=args.lr)
+                                            lr=args.lr,
+                                            hyper_lr=args.hyper_lr,
+                                            )
     augment_net_trainer.process()
 
     '''

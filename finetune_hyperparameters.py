@@ -59,7 +59,10 @@ class FinetuneHyperparameters(object):
         self.batch_size = 128
 
         # Learning rate
-        self.lr = 0.1
+        self.lr = 0.01
+
+        # Hyperparameter learning rate
+        self.hyper_lr = 0.01
 
         # Amount of weight decay
         self.wdecay = 5e-4
