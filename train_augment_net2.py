@@ -262,8 +262,8 @@ def parse_args():
     parser.add_argument('--model', type=str, default='mlp', metavar='M',
                         choices=[MODEL_RESNET18, MODEL_WIDERESNET, MODEL_MLP, MODEL_CNN_MLP],
                         help=f"Choose a model (default: {MODEL_MLP})")
-    parser.add_argument('--num-finetune-epochs', type=int, default=200, metavar='NFE',
-                        help='Number of fine-tuning epochs (default: 200)')
+    parser.add_argument('--num-finetune-epochs', type=int, default=10000, metavar='NFE',
+                        help='Number of fine-tuning epochs (default: 10000)')
     parser.add_argument('--lr', type=int, default=0.1, metavar='LR',
                         help='Learning rate (default: 0.1)')
     parser.add_argument('--hyper_lr', type=float, default=0.01, metavar='HYPERLR',
