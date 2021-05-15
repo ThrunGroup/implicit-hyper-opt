@@ -10,6 +10,29 @@ from torchvision import datasets, transforms
 
 # Local imports
 from HAM_dataset import HAM_dataset
+from constants import DATASET_CIFAR_10, DATASET_CIFAR_100, DATASET_MNIST, DATASET_BOSTON
+
+
+class DataLoaders(object):
+    @staticmethod
+    def get_data_loaders(dataset,
+                         batch_size,
+                         train_size,
+                         val_size,
+                         test_size,
+                         num_train=50000,
+                         val_split=True,
+                         data_augment=False,
+                         only_split_train=False):
+        subset = [train_size, val_size, test_size]
+        if dataset == DATASET_CIFAR_10:
+            return load_cifar10(batch_size, val_split=val_split, augmentation=data_augment, subset=subset)
+        elif dataset == DATASET_CIFAR_100:
+            return load_cifar100(batch_size, val_split=val_split, augmentation=data_augment, subset=subset)
+        elif dataset == DATASET_MNIST:
+            return load_mnist(batch_size, subset=subset, num_train=num_train, only_split_train=only_split_train)
+        elif dataset == DATASET_BOSTON:
+            return load_boston(batch_size)
 
 
 def getSubset(data, size):

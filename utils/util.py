@@ -1,6 +1,6 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy
-
 import torch
 from torch.autograd import grad
 from torch.autograd import Variable
@@ -222,3 +222,50 @@ def test_jacobian():
     fg = grad(f, x, create_graph=True)
     print(eval_jacobian(gather_flat_grad(fg), y))
     print(A)
+
+
+def save_models(epoch, elementary_model, elementary_optimizer, augment_net, reweighting_net, hyper_optimizer, path):
+    """
+    Saves torch models
+    """
+    if 'weight_decay' in elementary_model.__dict__:
+        torch.save({
+            'epoch': epoch,
+            'elementary_model_state_dict': elementary_model.state_dict(),
+            'weight_decay': elementary_model.weight_decay,
+            'elementary_optimizer_state_dict': elementary_optimizer.state_dict(),
+            'augment_model_state_dict': augment_net.state_dict(),
+            'reweighting_net_state_dict': reweighting_net.state_dict(),
+            'hyper_optimizer_state_dict': hyper_optimizer.state_dict()
+        }, path + '/checkpoint.pt')
+    else:
+        torch.save({
+            'epoch': epoch,
+            'elementary_model_state_dict': elementary_model.state_dict(),
+            'elementary_optimizer_state_dict': elementary_optimizer.state_dict(),
+            'augment_model_state_dict': augment_net.state_dict(),
+            'reweighting_net_state_dict': reweighting_net.state_dict(),
+            'hyper_optimizer_state_dict': hyper_optimizer.state_dict()
+        }, path + '/checkpoint.pt')
+
+
+def save_hessian(hessian, name):
+    print("saving...")
+    fig = plt.figure()
+    # clamp_min, clamp_max = -5.0, 5.0
+    hessian = torch.tanh(hessian)  # torch.clamp(hessian, clamp_min, clamp_max)
+    # hessian[hessian < -1e-4] = clamp_min
+    # hessian[hessian > 1e-4] = clamp_max
+    # hessian = torch.log(torch.abs(hessian))#torch.clamp(hessian, -1e1, 1e1)
+    # hessian[hessian == hessian] = torch.clamp(hessian[hessian == hessian], -10, 10)
+    # hessian[torch.abs(hessian) < 1e-0] = 0
+    data = hessian.detach().cpu().numpy()
+    im = plt.imshow(data, cmap='bwr', interpolation='none', vmin=-1, vmax=1)
+    # plt.title(f"Ground Truth: {i}", fontsize=4)
+    plt.xticks([])
+    plt.yticks([])
+    plt.draw()
+    cbar = plt.colorbar(im)
+    cbar.ax.tick_params(labelsize=20)
+    fig.savefig('images/hessian_' + str(name) + '.pdf')
+    plt.close(fig)
