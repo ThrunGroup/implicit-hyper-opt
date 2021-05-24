@@ -396,15 +396,6 @@ def experiment(args):
             pass
         elif args.hessian == 'identity' or args.hessian == 'direct':
             if args.hessian == 'identity':
-                '''for batch_idx, (x, y) in enumerate(train_loader):
-                    model.zero_grad()
-                    x, y = prepare_data(x, y)
-                    train_loss, _ = batch_loss(x, y, model, train_loss_func)
-                    train_loss_grad = grad(train_loss, model.parameters())
-                    d_train_loss_d_theta = gather_flat_grad(train_loss_grad)
-                    if batch_idx >= 0: break
-                d_train_loss_d_theta /= (batch_idx + 1)'''
-
                 pre_conditioner = d_val_loss_d_theta
                 # hessian_term = (pre_conditioner.view(1, -1) @ d_train_loss_d_theta.view(-1, 1) @ d_train_loss_d_theta.view(1, -1)).view(
                 #    -1)
@@ -463,19 +454,6 @@ def experiment(args):
             total_d_val_loss_d_lambda /= (batch_idx + 1)
         elif args.hessian == 'KFAC':
             # model.zero_grad()
-            '''model.train()
-            for kfac_epoch in range(1):
-                model.zero_grad()
-                for batch_idx, (x, y) in enumerate(train_loader):
-                    # if batch_idx > 50:  # TODO (JON): Just sample 50 random mini-batches?
-                    #     And break
-                    kfac_opt.zero_grad()
-                    x, y = prepare_data(x, y)
-                    train_loss, _ = batch_loss(x, y, model, train_loss_func)
-                    train_loss.backward()
-                    kfac_opt.fake_step()
-                    if batch_idx >= args.train_batch_num: break
-                    # TODO (JON):  Note that this not a normal K-FAC step - certain parts commented out.'''
             flat_pre_conditioner = torch.zeros(num_weights).cuda()
             for batch_idx, (x, y) in enumerate(train_loader):
                 model.train()
@@ -490,8 +468,6 @@ def experiment(args):
                 for m in model.modules():
                     if m.__class__.__name__ in ['Linear', 'Conv2d']:
                         # kfac_opt.zero_grad()
-
-                        # print(f'KFAC module: {m}')
                         if m.__class__.__name__ == 'Conv2d':
                             size0, size1 = m.weight.size(0), m.weight.view(m.weight.size(0), -1).size(1)
                         else:
@@ -499,47 +475,17 @@ def experiment(args):
                         mod_size1 = size1 + 1 if m.bias is not None else size1
                         shape = (size0, (mod_size1))
                         size = size0 * mod_size1
-
-                        '''# placeholder for d loss / d theta in validation dataset
-                        model.train()
-                        model.zero_grad()
-                        num_weights = sum(p.numel() for p in m.parameters())
-                        d_val_loss_d_theta = torch.zeros(num_weights).cuda()
-                        for val_batch_idx, (x_val, y_val) in enumerate(val_loader):
-                            model.zero_grad()
-                            x_val, y_val = prepare_data(x_val, y_val)
-                            val_loss, _ = batch_loss(x_val, y_val, model, val_loss_func)
-                            val_loss_grad = grad(val_loss, m.parameters())
-                            d_val_loss_d_theta += gather_flat_grad(val_loss_grad)
-                            if val_batch_idx >= args.val_batch_num: break
-                        d_val_loss_d_theta /= (val_batch_idx + 1)'''
-
-                        pre_conditioner = kfac_opt._get_natural_grad(m,
-                                                                     d_val_loss_d_theta[current:current + size].view(
-                                                                         shape),
-                                                                     KFAC_damping)
-
+                        pre_conditioner = kfac_opt._get_natural_grad(m,d_val_loss_d_theta[current:current + size].view(shape),KFAC_damping)
                         flat_pre_conditioner[current: current + size] = gather_flat_grad(pre_conditioner)
-
-                        '''model.train()
-                        model.zero_grad(), hyper_optimizer.zero_grad()
-                        x, y = prepare_data(x, y)
-                        train_loss, _ = batch_loss(x, y, model, train_loss_func)
-                        # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-                        d_train_loss_d_theta = grad(train_loss, m.parameters(), create_graph=True)
-                        flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)'''
-
-                        '''model.zero_grad(), hyper_optimizer.zero_grad()
-                        flat_d_train_loss_d_theta[current: current + size].backward(flat_pre_conditioner, create_graph=True)
-
-                        total_d_val_loss_d_lambda -= get_hyper_train().grad'''
                         current += size
                 model.zero_grad(), hyper_optimizer.zero_grad()
                 flat_d_train_loss_d_theta.backward(flat_pre_conditioner)
                 total_d_val_loss_d_lambda -= get_hyper_train().grad
-
                 if batch_idx >= args.train_batch_num: break
             total_d_val_loss_d_lambda /= (batch_idx + 1)
+        else:
+            print(args.hessian)
+            raise Exception("Need to call KFAC, Mo deleted other algos")
 
         direct_d_val_loss_d_lambda = torch.zeros(get_hyper_train().size(0))
         if args.cuda: direct_d_val_loss_d_lambda = direct_d_val_loss_d_lambda.cuda()
@@ -682,7 +628,6 @@ def save_learned(datas, is_mnist, batch_size, args):
 if __name__ == '__main__':
     torch.manual_seed(0)
 
-    ############### Parse arguments
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
 
     # Dataset parameters
@@ -805,7 +750,7 @@ if __name__ == '__main__':
         cur_args.hyper_train = 'all_weight'
         cur_args.l2 = -4
 
-        cur_args.hessian = 'identity'
+        cur_args.hessian = 'KFAC'
         cur_args.hepochs = 1000
         cur_args.epochs = 5
         cur_args.init_epochs = 5
@@ -815,95 +760,6 @@ if __name__ == '__main__':
 
         cur_args.graph_hessian = False
         return cur_args
-
-
-    def setup_graph_hessian():
-        cur_args = setup_overfit_validation('MNIST', 'mlp', 0)
-        cur_args.hessian = 'direct'
-        cur_args.graph_hessian = True
-        cur_args.hepochs = 5
-        return cur_args
-
-
-    def setup_inversion_comparison_direct():
-        # Launch a process for each args
-        args_direct = setup_overfit_validation('MNIST', 'mlp', 0)  # setup_direct_inversion()
-        args_direct.hessian = 'direct'
-
-        args_KFAC = setup_overfit_validation('MNIST', 'mlp', 0)
-        args_KFAC.hessian = 'KFAC'
-
-        args_identity = setup_overfit_validation('MNIST', 'mlp', 0)
-        args_identity.hessian = 'identity'
-
-        args_zero = setup_overfit_validation('MNIST', 'mlp', 0)
-        args_zero.hessian = 'zero'
-
-        returns = [args_direct, args_KFAC, args_identity, args_zero]
-        for val in returns:
-            val.hyper_log_interval = 1
-            val.testsize = 100
-            val.hepochs = 50000
-            val.datasize = 3500
-            val.valsize = 3500
-            val.batch_size = 64
-            val.eval_batch_num = 1
-        return returns
-
-
-    def setup_inversion_comparison_large():
-        # Launch a process for each args
-        model = 'resnet'
-        dataset = 'MNIST'
-        args_KFAC = setup_overfit_validation(dataset, model, 0)
-        args_KFAC.hessian = 'KFAC'
-
-        args_identity = setup_overfit_validation(dataset, model, 0)
-        args_identity.hessian = 'identity'
-
-        args_zero = setup_overfit_validation(dataset, model, 0)
-        args_zero.hessian = 'zero'
-
-        returns = [args_KFAC, args_identity, args_zero]
-        for val in returns:
-            val.hyper_log_interval = 1
-            val.batch_size = 128
-            val.datasize = -1
-            val.valsize = -1
-            val.testsize = 100
-            val.hepochs = 45000 // val.batch_size * 200
-            val.eval_batch_num = 1
-            val.l2 = -4
-        return returns
-
-
-    def setup_learn_images(dataset, num_images):
-        cur_args = setup_overfit_validation(dataset, 'mlp', 0)
-
-        cur_args.datasize = num_images
-        val_multiple = 1  # 000
-        cur_args.valsize = 100  # num_images * val_multiple
-        cur_args.testsize = 100
-
-        cur_args.batch_size = num_images
-
-        cur_args.train_batch_num = 1
-        cur_args.val_batch_num = val_multiple
-
-        cur_args.hyper_train = 'opt_data'
-
-        cur_args.epochs = 5
-        cur_args.hepochs = 10000
-        cur_args.hyper_log_interval = 10
-
-        return cur_args
-
-
-    def setup_learn_images_all_datasets():
-        args_MNIST = setup_learn_images('MNIST', 10)
-        args_CIFAR10 = setup_learn_images('CIFAR10', 10)
-        args_CIFAR100 = setup_learn_images('CIFAR100', 100)
-        return [args_MNIST]  # [args_MNIST, args_CIFAR10, args_CIFAR100]
 
 
     def setup_overfit_images():
@@ -920,7 +776,7 @@ if __name__ == '__main__':
                     args.testsize = 50
                     args.break_perfect_val = True
                     args.hepochs = 500 # TODO: I SHRUNK THIS
-                    args.hessian = 'identity'
+                    args.hessian = 'KFAC'
                     if dataset == 'CIFAR10':
                         args.lrh = 1e-2
                     elif dataset == 'MNIST':
@@ -937,11 +793,6 @@ if __name__ == '__main__':
                     # TODO: Idea - identical rmsprop on both?
                     argss += [args]
         return argss
-
-
-    execute_argss_hessian = [setup_graph_hessian()]
-    execute_argss_inversion = setup_inversion_comparison_direct()
-    execute_argss_learn_images = setup_learn_images_all_datasets()
 
     super_execute_argss = setup_overfit_images()
     # TODO (JON): I put different elementary optimizer and inverter
