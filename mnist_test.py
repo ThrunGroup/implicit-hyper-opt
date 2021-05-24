@@ -172,7 +172,127 @@ def change_saturation_brightness(x, saturation, brightness):
     brightness_noise = torch.randn(x.shape[0]).cuda() * torch.exp(brightness)
     return x * saturation_noise.view(-1, 1, 1, 1) + brightness_noise.view(-1, 1, 1, 1)
 
-################################################################################
+
+def KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_opt, KFAC_damping, epoch_h):
+    # set up placeholder for the partial derivative in each batch
+    total_d_val_loss_d_lambda = torch.zeros(get_hyper_train(args, model).size(0))
+    if args.cuda: total_d_val_loss_d_lambda = total_d_val_loss_d_lambda.cuda()
+
+    num_weights = sum(p.numel() for p in model.parameters())
+    d_val_loss_d_theta = torch.zeros(num_weights).cuda()
+    model.train()
+    for batch_idx, (x, y) in enumerate(val_loader):
+        model.zero_grad()
+        x, y = prepare_data(args, x, y)
+        val_loss, _ = batch_loss(args, model, x, y, model, val_loss_func)
+        val_loss_grad = grad(val_loss, model.parameters())
+        d_val_loss_d_theta += gather_flat_grad(val_loss_grad)
+        if batch_idx >= args.val_batch_num: break
+    d_val_loss_d_theta /= (batch_idx + 1)
+
+    # get d theta / d lambda
+    if args.hessian == 'zero':
+        pass
+    elif args.hessian == 'identity' or args.hessian == 'direct':
+        if args.hessian == 'identity':
+            pre_conditioner = d_val_loss_d_theta
+            flat_pre_conditioner = pre_conditioner  # 2*pre_conditioner - args.lr*hessian_term
+        elif args.hessian == 'direct':
+            assert args.dataset == 'MNIST' and args.model == 'mlp' and args.num_layers == 0, "Don't do direct for large problems."
+            hessian = torch.zeros(
+                num_weights, num_weights).cuda()  # grad(grad(train_loss, model.parameters()), model.parameters())
+            for batch_idx, (x, y) in enumerate(train_loader):
+                x, y = prepare_data(args, x, y)
+                train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
+                # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
+
+                model.zero_grad(), hyper_optimizer.zero_grad()
+                d_train_loss_d_theta = grad(train_loss, model.parameters(), create_graph=True, retain_graph=True)
+                flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)
+                for p_index, p in enumerate(flat_d_train_loss_d_theta):
+                    hessian_term = grad(p, model.parameters(), retain_graph=True)
+                    flat_hessian_term = gather_flat_grad(hessian_term)
+                    hessian[p_index] += flat_hessian_term
+                if batch_idx >= args.train_batch_num: break
+            hessian /= (batch_idx + 1)
+            inv_hessian = torch.pinverse(hessian)
+            pre_conditioner = d_val_loss_d_theta @ inv_hessian
+            flat_pre_conditioner = pre_conditioner
+
+        model.train()  # train()
+        for batch_idx, (x, y) in enumerate(train_loader):
+            x, y = prepare_data(args, x, y)
+            train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
+            # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
+
+            model.zero_grad(), hyper_optimizer.zero_grad()
+            d_train_loss_d_theta = grad(train_loss, model.parameters(), create_graph=True)
+            flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)
+
+            model.zero_grad(), hyper_optimizer.zero_grad()
+            flat_d_train_loss_d_theta.backward(flat_pre_conditioner)
+            if get_hyper_train(args, model).grad is not None:
+                total_d_val_loss_d_lambda -= get_hyper_train(args, model).grad
+            if batch_idx >= args.train_batch_num: break
+        total_d_val_loss_d_lambda /= (batch_idx + 1)
+    elif args.hessian == 'KFAC':
+        # model.zero_grad()
+        flat_pre_conditioner = torch.zeros(num_weights).cuda()
+        for batch_idx, (x, y) in enumerate(train_loader):
+            model.train()
+            model.zero_grad(), hyper_optimizer.zero_grad()
+            x, y = prepare_data(args, x, y)
+            train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
+            # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
+            d_train_loss_d_theta = grad(train_loss, model.parameters(), create_graph=True)
+            flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)
+
+            current = 0
+            for m in model.modules():
+                if m.__class__.__name__ in ['Linear', 'Conv2d']:
+                    # kfac_opt.zero_grad()
+                    if m.__class__.__name__ == 'Conv2d':
+                        size0, size1 = m.weight.size(0), m.weight.view(m.weight.size(0), -1).size(1)
+                    else:
+                        size0, size1 = m.weight.size(0), m.weight.size(1)
+                    mod_size1 = size1 + 1 if m.bias is not None else size1
+                    shape = (size0, (mod_size1))
+                    size = size0 * mod_size1
+                    pre_conditioner = kfac_opt._get_natural_grad(m,d_val_loss_d_theta[current:current + size].view(shape),KFAC_damping)
+                    flat_pre_conditioner[current: current + size] = gather_flat_grad(pre_conditioner)
+                    current += size
+            model.zero_grad(), hyper_optimizer.zero_grad()
+            flat_d_train_loss_d_theta.backward(flat_pre_conditioner)
+            total_d_val_loss_d_lambda -= get_hyper_train(args, model).grad
+            if batch_idx >= args.train_batch_num: break
+        total_d_val_loss_d_lambda /= (batch_idx + 1)
+    else:
+        print(args.hessian)
+        raise Exception(f"Passed {args.hessian}, not a valid choice")
+
+    direct_d_val_loss_d_lambda = torch.zeros(get_hyper_train(args, model).size(0))
+    if args.cuda: direct_d_val_loss_d_lambda = direct_d_val_loss_d_lambda.cuda()
+    model.train()
+    for batch_idx, (x_val, y_val) in enumerate(val_loader):
+        model.zero_grad(), hyper_optimizer.zero_grad()
+        x_val, y_val = prepare_data(args, x_val, y_val)
+        val_loss, _ = batch_loss(args, model, x_val, y_val, model, val_loss_func)
+        val_loss_grad = grad(val_loss, get_hyper_train(args, model), allow_unused=True)
+        if val_loss_grad is not None and val_loss_grad[0] is not None:
+            direct_d_val_loss_d_lambda += gather_flat_grad(val_loss_grad)
+        else:
+            break
+        if batch_idx >= args.val_batch_num: break
+    direct_d_val_loss_d_lambda /= (batch_idx + 1)
+
+    get_hyper_train(args, model).grad = direct_d_val_loss_d_lambda + total_d_val_loss_d_lambda
+    print("weight={}, update={}".format(get_hyper_train(args, model).norm(), get_hyper_train(args, model).grad.norm()))
+
+    hyper_optimizer.step()
+    model.zero_grad(), hyper_optimizer.zero_grad()
+    return get_hyper_train(args, model), get_hyper_train(args, model).grad
+
+
 def experiment(args):
     print(f"Running experiment with args: {args}")
     args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -225,126 +345,6 @@ def experiment(args):
     KFAC_damping = 1e-2
     kfac_opt = KFACOptimizer(model, damping=KFAC_damping)  # sec_optimizer
 
-    def KFAC_optimize(epoch_h):
-        # set up placeholder for the partial derivative in each batch
-        total_d_val_loss_d_lambda = torch.zeros(get_hyper_train(args, model).size(0))
-        if args.cuda: total_d_val_loss_d_lambda = total_d_val_loss_d_lambda.cuda()
-
-        num_weights = sum(p.numel() for p in model.parameters())
-        d_val_loss_d_theta = torch.zeros(num_weights).cuda()
-        model.train()
-        for batch_idx, (x, y) in enumerate(val_loader):
-            model.zero_grad()
-            x, y = prepare_data(args, x, y)
-            val_loss, _ = batch_loss(args, model, x, y, model, val_loss_func)
-            val_loss_grad = grad(val_loss, model.parameters())
-            d_val_loss_d_theta += gather_flat_grad(val_loss_grad)
-            if batch_idx >= args.val_batch_num: break
-        d_val_loss_d_theta /= (batch_idx + 1)
-
-        # get d theta / d lambda
-        if args.hessian == 'zero':
-            pass
-        elif args.hessian == 'identity' or args.hessian == 'direct':
-            if args.hessian == 'identity':
-                pre_conditioner = d_val_loss_d_theta
-                flat_pre_conditioner = pre_conditioner  # 2*pre_conditioner - args.lr*hessian_term
-            elif args.hessian == 'direct':
-                assert args.dataset == 'MNIST' and args.model == 'mlp' and args.num_layers == 0, "Don't do direct for large problems."
-                hessian = torch.zeros(
-                    num_weights, num_weights).cuda()  # grad(grad(train_loss, model.parameters()), model.parameters())
-                for batch_idx, (x, y) in enumerate(train_loader):
-                    x, y = prepare_data(args, x, y)
-                    train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
-                    # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-
-                    model.zero_grad(), hyper_optimizer.zero_grad()
-                    d_train_loss_d_theta = grad(train_loss, model.parameters(), create_graph=True, retain_graph=True)
-                    flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)
-                    for p_index, p in enumerate(flat_d_train_loss_d_theta):
-                        hessian_term = grad(p, model.parameters(), retain_graph=True)
-                        flat_hessian_term = gather_flat_grad(hessian_term)
-                        hessian[p_index] += flat_hessian_term
-                    if batch_idx >= args.train_batch_num: break
-                hessian /= (batch_idx + 1)
-                inv_hessian = torch.pinverse(hessian)
-                pre_conditioner = d_val_loss_d_theta @ inv_hessian
-                flat_pre_conditioner = pre_conditioner
-
-            model.train()  # train()
-            for batch_idx, (x, y) in enumerate(train_loader):
-                x, y = prepare_data(args, x, y)
-                train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
-                # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-
-                model.zero_grad(), hyper_optimizer.zero_grad()
-                d_train_loss_d_theta = grad(train_loss, model.parameters(), create_graph=True)
-                flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)
-
-                model.zero_grad(), hyper_optimizer.zero_grad()
-                flat_d_train_loss_d_theta.backward(flat_pre_conditioner)
-                if get_hyper_train(args, model).grad is not None:
-                    total_d_val_loss_d_lambda -= get_hyper_train(args, model).grad
-                if batch_idx >= args.train_batch_num: break
-            total_d_val_loss_d_lambda /= (batch_idx + 1)
-        elif args.hessian == 'KFAC':
-            # model.zero_grad()
-            flat_pre_conditioner = torch.zeros(num_weights).cuda()
-            for batch_idx, (x, y) in enumerate(train_loader):
-                model.train()
-                model.zero_grad(), hyper_optimizer.zero_grad()
-                x, y = prepare_data(args, x, y)
-                train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
-                # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-                d_train_loss_d_theta = grad(train_loss, model.parameters(), create_graph=True)
-                flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)
-
-                current = 0
-                for m in model.modules():
-                    if m.__class__.__name__ in ['Linear', 'Conv2d']:
-                        # kfac_opt.zero_grad()
-                        if m.__class__.__name__ == 'Conv2d':
-                            size0, size1 = m.weight.size(0), m.weight.view(m.weight.size(0), -1).size(1)
-                        else:
-                            size0, size1 = m.weight.size(0), m.weight.size(1)
-                        mod_size1 = size1 + 1 if m.bias is not None else size1
-                        shape = (size0, (mod_size1))
-                        size = size0 * mod_size1
-                        pre_conditioner = kfac_opt._get_natural_grad(m,d_val_loss_d_theta[current:current + size].view(shape),KFAC_damping)
-                        flat_pre_conditioner[current: current + size] = gather_flat_grad(pre_conditioner)
-                        current += size
-                model.zero_grad(), hyper_optimizer.zero_grad()
-                flat_d_train_loss_d_theta.backward(flat_pre_conditioner)
-                total_d_val_loss_d_lambda -= get_hyper_train(args, model).grad
-                if batch_idx >= args.train_batch_num: break
-            total_d_val_loss_d_lambda /= (batch_idx + 1)
-        else:
-            print(args.hessian)
-            raise Exception(f"Passed {args.hessian}, not a valid choice")
-
-        direct_d_val_loss_d_lambda = torch.zeros(get_hyper_train(args, model).size(0))
-        if args.cuda: direct_d_val_loss_d_lambda = direct_d_val_loss_d_lambda.cuda()
-        model.train()
-        for batch_idx, (x_val, y_val) in enumerate(val_loader):
-            model.zero_grad(), hyper_optimizer.zero_grad()
-            x_val, y_val = prepare_data(args, x_val, y_val)
-            val_loss, _ = batch_loss(args, model, x_val, y_val, model, val_loss_func)
-            val_loss_grad = grad(val_loss, get_hyper_train(args, model), allow_unused=True)
-            if val_loss_grad is not None and val_loss_grad[0] is not None:
-                direct_d_val_loss_d_lambda += gather_flat_grad(val_loss_grad)
-            else:
-                break
-            if batch_idx >= args.val_batch_num: break
-        direct_d_val_loss_d_lambda /= (batch_idx + 1)
-
-        get_hyper_train(args, model).grad = direct_d_val_loss_d_lambda + total_d_val_loss_d_lambda
-        print("weight={}, update={}".format(get_hyper_train(args, model).norm(), get_hyper_train(args, model).grad.norm()))
-
-        hyper_optimizer.step()
-        model.zero_grad(), hyper_optimizer.zero_grad()
-        return get_hyper_train(args, model), get_hyper_train(args, model).grad
-
-
     ########### Perform the training
     global_step = 0
     hp_k, update = 0, 0
@@ -353,11 +353,7 @@ def experiment(args):
         if (epoch_h) % args.hyper_log_interval == 0:
             if args.hyper_train == 'opt_data':
                 if args.dataset == 'MNIST':
-                    save_learned(get_hyper_train(args, model).reshape(args.batch_size, imsize, imsize), True, args.batch_size,
-                                 args)
-                elif args.dataset == 'CIFAR10' or args.dataset == 'CIFAR100':
-                    save_learned(get_hyper_train(args, model).reshape(args.batch_size, in_channel, imsize, imsize), False,
-                                 args.batch_size, args)
+                    save_learned(get_hyper_train(args, model).reshape(args.batch_size, imsize, imsize), True, args.batch_size, args)
             elif args.hyper_train == 'various':
                 print(f"saturation: {torch.sigmoid(model.various[0])}, brightness: {torch.sigmoid(model.various[1])}, decay: {torch.exp(model.various[2])}")
             eval_train_corr, eval_train_loss = evaluate(args, model, global_step, train_loader, 'train')
@@ -387,7 +383,7 @@ def experiment(args):
         # if epoch_h == 0:
         #     continue
 
-        hp_k, update = KFAC_optimize(epoch_h)
+        hp_k, update = KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_opt, KFAC_damping, epoch_h)
 
 
 def save_learned(datas, is_mnist, batch_size, args):
