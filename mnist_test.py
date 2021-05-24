@@ -355,7 +355,6 @@ def experiment(args):
 
     ########### Perform the training
     global_step = 0
-
     hp_k, update = 0, 0
     for epoch_h in range(0, args.hepochs + 1):
         print(f"Hyper epoch: {epoch_h}")
@@ -377,7 +376,6 @@ def experiment(args):
                 break
 
         min_loss = 10e8
-
         elementary_epochs = args.epochs
         if epoch_h == 0:
             elementary_epochs = args.init_epochs
@@ -402,7 +400,6 @@ def experiment(args):
 
 def save_learned(datas, is_mnist, batch_size, args):
     print("saving...")
-
     saturation_multiple = 5
     if not is_mnist:
         saturation_multiple = 5
@@ -430,6 +427,72 @@ def save_learned(datas, is_mnist, batch_size, args):
     fig.savefig('images/learned_images_' + args.dataset + '_' + str(args.batch_size) + '_' + args.model + '.pdf')
     plt.close(fig)
 
+
+def setup_overfit_validation(dataset, model, num_layers):
+    cur_args = copy.deepcopy(args)
+    cur_args.datasize = 50
+    cur_args.valsize = 50
+    cur_args.testsize = -1
+
+    cur_args.lr = 1e-4
+    # cur_args.lrh = 1e-2
+
+    cur_args.batch_size = cur_args.datasize
+
+    cur_args.train_batch_num = 1
+    cur_args.val_batch_num = 1
+    cur_args.eval_batch_num = 100
+
+    cur_args.dataset = dataset
+    cur_args.model = model
+    cur_args.num_layers = num_layers
+
+    cur_args.hyper_train = 'all_weight'
+    cur_args.l2 = -4
+
+    cur_args.hessian = 'KFAC'
+    cur_args.hepochs = 1000
+    cur_args.epochs = 5
+    cur_args.init_epochs = 5
+
+    cur_args.elementary_log_interval = 5
+    cur_args.hyper_log_interval = 50
+
+    cur_args.graph_hessian = False
+    return cur_args
+
+
+def setup_overfit_images():
+    argss = []
+    # TODO: Try other optimizers! Ex. Adam?
+    for dataset in ['MNIST']:  #'MNIST', 'CIFAR10']:  # 'MNIST',
+        for model in ['mlp']: #'mlp', 'alexnet', 'resnet']:  # 'mlp', 'cnn',
+            layer_selection = [1]
+#                 if model == 'mlp':
+#                     layer_selection = [1, 0]
+            for num_layers in layer_selection:
+                args = setup_overfit_validation(dataset, model, num_layers)
+                args.hyper_log_interval = 1
+                args.testsize = 50
+                args.break_perfect_val = True
+                args.hepochs = 500 # TODO: I SHRUNK THIS
+                args.hessian = 'KFAC'
+                if dataset == 'CIFAR10':
+                    args.lrh = 1e-2
+                elif dataset == 'MNIST':
+                    args.lrh = 1e-1
+                if model == 'alexnet' and dataset == 'MNIST':
+                    args.lr = 7e-4  # 1e-3
+                elif model == 'resnet' and dataset == 'CIFAR10':
+                    args.lr = 1e-5  # 1e-5
+
+                # TODO: Higher capacity models need less lr
+                # TODO: Ex. same architecture on MNIST has more capacity than on CIFAR
+                # TODO: Higher capacity hypers need less lr
+                # TODO: model and hyper progress must be balanced
+                # TODO: Idea - identical rmsprop on both?
+                argss += [args]
+    return argss
 
 if __name__ == '__main__':
     torch.manual_seed(0)
@@ -532,73 +595,6 @@ if __name__ == '__main__':
                         help='random seed (default: 1)')
 
     args = parser.parse_args()
-
-
-    def setup_overfit_validation(dataset, model, num_layers):
-        cur_args = copy.deepcopy(args)
-        cur_args.datasize = 50
-        cur_args.valsize = 50
-        cur_args.testsize = -1
-
-        cur_args.lr = 1e-4
-        # cur_args.lrh = 1e-2
-
-        cur_args.batch_size = cur_args.datasize
-
-        cur_args.train_batch_num = 1
-        cur_args.val_batch_num = 1
-        cur_args.eval_batch_num = 100
-
-        cur_args.dataset = dataset
-        cur_args.model = model
-        cur_args.num_layers = num_layers
-
-        cur_args.hyper_train = 'all_weight'
-        cur_args.l2 = -4
-
-        cur_args.hessian = 'KFAC'
-        cur_args.hepochs = 1000
-        cur_args.epochs = 5
-        cur_args.init_epochs = 5
-
-        cur_args.elementary_log_interval = 5
-        cur_args.hyper_log_interval = 50
-
-        cur_args.graph_hessian = False
-        return cur_args
-
-
-    def setup_overfit_images():
-        argss = []
-        # TODO: Try other optimizers! Ex. Adam?
-        for dataset in ['MNIST']:  #'MNIST', 'CIFAR10']:  # 'MNIST',
-            for model in ['mlp']: #'mlp', 'alexnet', 'resnet']:  # 'mlp', 'cnn',
-                layer_selection = [1]
-#                 if model == 'mlp':
-#                     layer_selection = [1, 0]
-                for num_layers in layer_selection:
-                    args = setup_overfit_validation(dataset, model, num_layers)
-                    args.hyper_log_interval = 1
-                    args.testsize = 50
-                    args.break_perfect_val = True
-                    args.hepochs = 500 # TODO: I SHRUNK THIS
-                    args.hessian = 'KFAC'
-                    if dataset == 'CIFAR10':
-                        args.lrh = 1e-2
-                    elif dataset == 'MNIST':
-                        args.lrh = 1e-1
-                    if model == 'alexnet' and dataset == 'MNIST':
-                        args.lr = 7e-4  # 1e-3
-                    elif model == 'resnet' and dataset == 'CIFAR10':
-                        args.lr = 1e-5  # 1e-5
-
-                    # TODO: Higher capacity models need less lr
-                    # TODO: Ex. same architecture on MNIST has more capacity than on CIFAR
-                    # TODO: Higher capacity hypers need less lr
-                    # TODO: model and hyper progress must be balanced
-                    # TODO: Idea - identical rmsprop on both?
-                    argss += [args]
-        return argss
 
     super_execute_argss = setup_overfit_images()
     # TODO (JON): I put different elementary optimizer and inverter
