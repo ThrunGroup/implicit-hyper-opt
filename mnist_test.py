@@ -24,15 +24,6 @@ from models.resnet_cifar import resnet44
 sys.path.insert(0, '/scratch/gobi1/datasets')
 
 
-# Unused imports
-# from logger import Logger
-# from plot_utils import plotResult, plot_all, showAllL2, showAllL2Change
-# from itertools import cycle
-# import matplotlib.pyplot as plt
-# import torch.nn as nn
-# from torchvision import datasets, transforms
-# from tqdm import tqdm
-
 
 def experiment(args):
     """TODO (JON): Add an explanation of what this experiment is doing.
@@ -57,16 +48,12 @@ def experiment(args):
     np.random.seed(args.seed)
     if args.cuda: torch.cuda.manual_seed(args.seed)
 
-    ###############################################################################
-    # Setup dataset
-    ###############################################################################
+    ########## Setup dataset
     # TODO (JON): Verify that the loaders are shuffling the validation / test sets.
     if args.dataset == 'MNIST':
         num_train = args.datasize
         if num_train == -1: num_train = 50000
-        train_loader, val_loader, test_loader = load_mnist(args.batch_size,
-                                                           subset=[args.datasize, args.valsize, args.testsize],
-                                                           num_train=num_train)
+        train_loader, val_loader, test_loader = load_mnist(args.batch_size, subset=[args.datasize, args.valsize, args.testsize], num_train=num_train)
         in_channel = 1
         imsize = 28
         fc_shape = 800
@@ -104,9 +91,7 @@ def experiment(args):
         in_channel, imsize, fc_shape, num_classes = None, None, None, None
     # TODO (JON): Right now we are not using the test loader for anything.  Should evaluate it occasionally.
 
-    ###############################################################################
-    # Setup model
-    ###############################################################################
+    ##################### Setup model
     if args.model == "mlp":
         model = Net(args.num_layers, args.dropout, imsize, in_channel, args.l2, num_classes=num_classes)
     elif args.model == "cnn":
@@ -117,38 +102,8 @@ def experiment(args):
                     num_classes=num_classes)
     elif args.model == "resnet":
         model = resnet44(dropout=args.dropout, num_classes=num_classes, in_channel=in_channel)
-    elif args.model == 'pretrained':
-        from cnn_finetune import make_model
-        classes = (
-            'plane', 'car', 'bird', 'cat', 'deer',
-            'dog', 'frog', 'horse', 'ship', 'truck'
-        )
-        # def do_train(self):
-        #    self.train()
-        # def do_eval(self):
-        #    self.eval()
-        model_name = 'resnet50'
-        model = make_model(
-            model_name,
-            pretrained=True,
-            num_classes=len(classes),
-            input_size=(32, 32) if model_name.startswith(('vgg', 'squeezenet')) else None,
-        )
-
-        def all_L2_loss():
-            loss = 0
-            count = 0
-            for p in model.parameters():
-                loss += torch.sum(
-                    torch.mul(torch.exp(model.weight_decay[count: count + p.numel()]), torch.flatten(torch.mul(p, p))))
-                # val = torch.flatten(p) - self.weight_decay[count: count + p.numel()]
-                # loss += 1e-3 * torch.sum(torch.mul(val, val))
-                count += p.numel()
-            return loss * torch.exp(model.weight_decay[0])
-
-        model.all_L2_loss = all_L2_loss
-        # model.do_train=do_train
-        # model.do_eval=do_eval
+    else:
+        raise Exception("bad model")
 
     def init_hyper_train():
         """
@@ -212,9 +167,7 @@ def experiment(args):
         model.weight_decay = model.weight_decay.cuda()
         # model.Gaussian.dropout = model.Gaussian.dropout.cuda()
 
-    ###############################################################################
-    # Setup Optimizer
-    ###############################################################################
+    ############ Setup Optimizer
     # TODO (JON):  Add argument for other optimizers?
     init_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)  # , momentum=0.9)
 
@@ -227,9 +180,7 @@ def experiment(args):
     hyper_optimizer = torch.optim.RMSprop([get_hyper_train()])  # , lr=args.lrh)  # try 0.1 as lr
     # Adam([get_hyper_train()], lr=0.1) # , lr=0.01)  # , lr=args.lrh)  #, lr=0.1)  # , lr=1e-4) #, args.lrh)
 
-    ###############################################################################
-    # Setup Saving
-    ###############################################################################
+    ############# Setup Saving
     # TODO (JON): Move these directory initializers to some other part.
     directory_name_vals = {'model': args.model, 'lrh': 0.1, 'jacob': args.jacobian,
                            'hessian': args.hessian, 'size': args.datasize, 'valsize': args.valsize,
@@ -250,9 +201,7 @@ def experiment(args):
                     'hp_update'],
         filename=os.path.join(directory, 'epoch_h_log.csv'))
 
-    ###############################################################################
-    # Setup Training
-    ###############################################################################
+    ############## Setup Training
     def change_saturation_brightness(x, saturation, brightness):
         # print(saturation, brightness)
         saturation_noise = 1.0 + torch.randn(x.shape[0]).cuda() * torch.exp(saturation)
@@ -415,9 +364,7 @@ def experiment(args):
         print(f'Evaluate {name}, {step}: Average loss: {total_loss:.4f}, Accuracy: {correct}/{data_size} ({acc}%)')
         return acc, total_loss
 
-    ###############################################################################
-    # Setup Inversion Algorithms
-    ###############################################################################
+    ############## Setup Inversion Algorithms
 
     # TODO (JON):  We probably want CG_optimize and KFAC_optimize in a different file?
     KFAC_damping = 1e-2
@@ -616,73 +563,8 @@ def experiment(args):
         model.zero_grad(), hyper_optimizer.zero_grad()
         return get_hyper_train(), get_hyper_train().grad
 
-    # TODO (JON):  We probably want CG_optimize and KFAC_optimize in a different file?
-    def CG_optimize():
-        """
 
-        :return:
-        """
-        global model
-        model = model.double()
-        model.Gaussian.dropout = Variable(model.Gaussian.dropout.double(), requires_grad=True)
-        model.weight_decay = Variable(model.weight_decay.double(), requires_grad=True)
-        if args.cuda: model.weight_decay = model.weight_decay.cuda()
-
-        model.eval()
-        model.zero_grad()
-        train_loss = 0
-        for batch_idx, (x, y) in enumerate(train_loader):
-            # Load x.
-            x = x.double()
-            x, y = prepare_data(x, y)
-
-            train_loss += batch_loss(x, y, model, train_loss_func)
-
-        train_loss /= len(train_loader)  # batch_idx
-
-        train_loss_grad = grad(train_loss, model.parameters(), create_graph=True)
-        grad_vec = gather_flat_grad(train_loss_grad).double()
-
-        d_loss_d_l = grad(train_loss, get_hyper_train(), create_graph=True)
-        jacobian = eval_jacobian(gather_flat_grad(d_loss_d_l).double(), model, args.cuda).double()
-
-        d_theta_d_lambda = torch.DoubleTensor(np.zeros((jacobian.size(1), jacobian.size(0))))
-        if args.cuda: d_theta_d_lambda = d_theta_d_lambda.cuda()
-        for i in range(jacobian.size(1)):
-            con_grad, k = conjugate_gradiant(grad_vec, jacobian[:, i].unsqueeze(0).permute(1, 0), model, args.cuda,
-                                             None)
-            d_theta_d_lambda[i] = con_grad.view(-1)
-
-        optimizer.zero_grad()
-        val_loss = 0
-        for batch_idx, (x, y) in enumerate(val_loader):
-            x = x.double()
-            if args.cuda: x, y = x.cuda(), y.cuda()
-            x, y = Variable(x), Variable(y)
-            val_loss += batch_loss(x, y, model, val_loss_func)
-
-        val_loss /= len(val_loader)  # batch_idx
-        val_loss_grad = grad(val_loss, model.parameters(), retain_graph=True)
-        grad_vec = gather_flat_grad(val_loss_grad)
-
-        d_loss_d_lambda = d_theta_d_lambda @ grad_vec
-        hyper_update = args.lrh * d_loss_d_lambda
-        if args.cuda: hyper_update = hyper_update.cuda()
-        print(f"weight={get_hyper_train().norm()}, update={hyper_update.norm()}")
-        hyper = get_hyper_train() - hyper_update
-        model = model.float()
-        model.Gaussian.dropout = Variable(model.Gaussian.dropout.float(), requires_grad=True)
-
-        if args.cuda:
-            model.weight_decay = Variable(model.weight_decay.float(), requires_grad=True).cuda()
-        else:
-            model.weight_decay = Variable(model.weight_decay.float(), requires_grad=True)
-
-        return hyper, hyper_update
-
-    ###############################################################################
-    # Perform the training
-    ###############################################################################
+    ########### Perform the training
     global_step = 0
 
     hp_k, update = 0, 0
@@ -799,29 +681,8 @@ def save_learned(datas, is_mnist, batch_size, args):
 
 if __name__ == '__main__':
     torch.manual_seed(0)
-    # TODO (JON): We want some way to invoke multiple experiments easily and automatically
-    #   (1) Vary the architecture we use
-    #   (2) Vary the data set we use
-    #   (3) Vary the hyperparameters we optimize
 
-    # TODO (JON): We need a way to run baselines for the problems we look at
-    #   (1) Need to be able to dump architecture/dataset/hyperparam to baseline
-    #   (2) Store similar output for baselines so easy to load and graph
-
-    # TODO (JON): We need some way to load output from experiments easily
-    #   (1) Open up the correct directory
-    #   (2) Iterate over all output and get raw data
-    #   (3) Return structured raw data
-
-    # TODO (JON): We need some way to graph the loaded output easily.
-    #   (1) Graph {train/val/test loss, train/val/test accuracy} vs
-    #       {elementary iteration, hyper iteration, run time} for IFT algo
-    #   (2) Graph losses/accuracies for baselines
-    #   (3) Visualize high-dimensional hyperparameters
-
-    ###############################################################################
-    # Parse arguments
-    ###############################################################################
+    ############### Parse arguments
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
 
     # Dataset parameters
@@ -1053,7 +914,6 @@ if __name__ == '__main__':
                 layer_selection = [1]
 #                 if model == 'mlp':
 #                     layer_selection = [1, 0]
-
                 for num_layers in layer_selection:
                     args = setup_overfit_validation(dataset, model, num_layers)
                     args.hyper_log_interval = 1
@@ -1083,26 +943,6 @@ if __name__ == '__main__':
     execute_argss_inversion = setup_inversion_comparison_direct()
     execute_argss_learn_images = setup_learn_images_all_datasets()
 
-    # super_execute_argss = execute_argss_hessian + execute_argss_inversion + execute_argss_learn_images
-    # super_execute_argss = execute_argss_inversion  #[execute_argss_learn_images[1]]  # execute_argss_inversion
-    '''temp_args = setup_overfit_validation('CIFAR10', 'mlp', 1)
-    temp_args.datasize = 10
-    temp_args.batch_size = temp_args.datasize
-    temp_args.valsize = -1
-    temp_args.testsize = 200
-    temp_args.hyper_train = 'opt_data'
-    temp_args.hessian = 'KFAC'
-    temp_args.hyper_log_interval = 5
-    temp_args.eval_batch_num = 100
-    temp_args.hepochs = 1000'''
-    # temp_args = setup_learn_images('CIFAR10', 10)
-    # temp_args.model = 'mlp'
-    # temp_args.hessian = 'identity'
-    # temp_args.l2 = -10
-    # super_execute_argss = [temp_args]
-
-    #super_execute_argss = [setup_overfit_validation('CIFAR10', 'resnet',
-    #                                                0)]  # execute_argss_learn_images  #setup_overfit_images()  #setup_inversion_comparison_large()
     super_execute_argss = setup_overfit_images()
     # TODO (JON): I put different elementary optimizer and inverter
     do_multiprocess = False
@@ -1113,9 +953,6 @@ if __name__ == '__main__':
         for execute_args in super_execute_argss:
             print(execute_args)
             experiment(execute_args)
-
-    # print(args)
-    # experiment(args)
 
     # TODO: Separate out the part of the code that specifies arguments for experiments!
     # TODO: Also, we should have plot_utils load paths from the arguments we provide?
