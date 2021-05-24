@@ -707,13 +707,18 @@ def experiment(args):
             # TODO (JON):  I don't know if we want normal train loss, or eval?
             eval_val_corr, eval_val_loss = evaluate(epoch_h, val_loader, 'valid')
             eval_test_corr, eval_test_loss = evaluate(epoch_h, test_loader, 'test')
-            epoch_row = {'hyper_param': str(hp_k), 'train_loss': eval_train_loss,
-                         'train_acc': str(eval_train_corr),
-                         'val_loss': str(eval_val_loss), 'val_acc': str(eval_val_corr),
-                         'test_loss': str(eval_test_loss), 'test_acc': str(eval_test_corr),
-                         'epoch_h': str(epoch_h),
-                         'hp_update': str(update)}
-            epoch_h_csv_logger.writerow(epoch_row)
+            epoch_row = {
+                            # 'hyper_param': str(hp_k),
+                            'train_loss': eval_train_loss,
+                            'train_acc': str(eval_train_corr),
+                            'val_loss': str(eval_val_loss),
+                            'val_acc': str(eval_val_corr),
+                            'test_loss': str(eval_test_loss),
+                            'test_acc': str(eval_test_corr),
+                            # 'epoch_h': str(epoch_h),
+                            # 'hp_update': str(update),
+                        }
+            # epoch_h_csv_logger.writerow(**epoch_row)
             if args.break_perfect_val and eval_val_corr >= 0.999 and eval_train_corr >= 0.999:
                 break
 
@@ -731,7 +736,7 @@ def experiment(args):
 
             epoch_row = {'epoch': str(epoch), 'train_loss': epoch_train_loss}
             # , 'val_loss': str(val_loss), 'val_acc': str(val_corr)}
-            epoch_csv_logger.writerow(epoch_row)
+            # epoch_csv_logger.writerow(**epoch_row)
 
             if np.isnan(epoch_train_loss):
                 print("Loss is nan, stop the loop")
