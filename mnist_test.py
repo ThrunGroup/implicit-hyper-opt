@@ -1,4 +1,3 @@
-"""TODO (JON): Add a description of what we are using this file for."""
 import os
 import sys
 import argparse
@@ -21,15 +20,59 @@ from utils.csv_logger import CSVLogger
 from ruamel.yaml import YAML
 from models.resnet_cifar import resnet44
 
-sys.path.insert(0, '/scratch/gobi1/datasets')
 
+def init_hyper_train(args, model):
+    init_hyper = None
+    if args.hyper_train == 'weight':
+        init_hyper = args.l2
+        model.weight_decay = Variable(torch.FloatTensor([init_hyper]).cuda(), requires_grad=True)
+        # if args.cuda: model.weight_decay = model.weight_decay.cuda()
+    elif args.hyper_train == 'all_weight':
+        init_hyper = args.l2
+        num_p = sum(p.numel() for p in model.parameters())
+        weights = np.ones(num_p) * init_hyper
+        model.weight_decay = Variable(torch.FloatTensor(weights).cuda(), requires_grad=True)
+        # if args.cuda: model.weight_decay = model.weight_decay.cuda()
+    elif args.hyper_train == 'opt_data':
+        model.num_opt_data = args.batch_size
+        # opt_data = torch.zeros(imsize*imsize*in_channel * model.num_opt_data, requires_grad=True)
+        init_x = torch.randn(imsize * imsize * in_channel * model.num_opt_data).cuda() * 0.0  # 0.1
+        init_y = torch.tensor([i % num_classes for i in range(model.num_opt_data)])
+        # for x, y in train_loader:
+        #   init_x = gather_flat_grad(x).cuda()
+        #   init_y = y
+        model.opt_data = Variable(init_x, requires_grad=True)
+        # torch.FloatTensor(opt_data), requires_grad=True)
+        model.opt_data_y = init_y
+        if args.cuda:
+            # model.opt_data = model.opt_data.cuda()
+            model.opt_data_y = model.opt_data_y.cuda()
+    elif args.hyper_train == 'dropout':
+        init_hyper = args.dropout
+        model.Gaussian.dropout = Variable(torch.FloatTensor([init_hyper]), requires_grad=True)
+        if args.cuda: model.Gaussian.dropout = Variable(torch.FloatTensor([init_hyper]).cuda(), requires_grad=True)
+    elif args.hyper_train == 'various':
+        inits = np.zeros(3) - 3
+        model.various = Variable(torch.FloatTensor(inits).cuda(), requires_grad=True)
+    return init_hyper
+
+def get_hyper_train(args, model):
+    if args.hyper_train == 'weight':
+        return model.weight_decay
+    elif args.hyper_train == 'all_weight':
+        return model.weight_decay
+    elif args.hyper_train == 'opt_data':
+        return model.opt_data
+    elif args.hyper_train == 'dropout':
+        return model.Gaussian.dropout
+    elif args.hyper_train == 'various':
+        return model.various
 
 
 def experiment(args):
     print(f"Running experiment with args: {args}")
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
-    # Do this since
     args.train_batch_num -= 1
     args.val_batch_num -= 1
     args.eval_batch_num -= 1
@@ -94,54 +137,8 @@ def experiment(args):
     else:
         raise Exception("bad model")
 
-    def init_hyper_train():
-        init_hyper = None
-        if args.hyper_train == 'weight':
-            init_hyper = args.l2
-            model.weight_decay = Variable(torch.FloatTensor([init_hyper]).cuda(), requires_grad=True)
-            # if args.cuda: model.weight_decay = model.weight_decay.cuda()
-        elif args.hyper_train == 'all_weight':
-            init_hyper = args.l2
-            num_p = sum(p.numel() for p in model.parameters())
-            weights = np.ones(num_p) * init_hyper
-            model.weight_decay = Variable(torch.FloatTensor(weights).cuda(), requires_grad=True)
-            # if args.cuda: model.weight_decay = model.weight_decay.cuda()
-        elif args.hyper_train == 'opt_data':
-            model.num_opt_data = args.batch_size
-            # opt_data = torch.zeros(imsize*imsize*in_channel * model.num_opt_data, requires_grad=True)
-            init_x = torch.randn(imsize * imsize * in_channel * model.num_opt_data).cuda() * 0.0  # 0.1
-            init_y = torch.tensor([i % num_classes for i in range(model.num_opt_data)])
-            # for x, y in train_loader:
-            #   init_x = gather_flat_grad(x).cuda()
-            #   init_y = y
-            model.opt_data = Variable(init_x, requires_grad=True)
-            # torch.FloatTensor(opt_data), requires_grad=True)
-            model.opt_data_y = init_y
-            if args.cuda:
-                # model.opt_data = model.opt_data.cuda()
-                model.opt_data_y = model.opt_data_y.cuda()
-        elif args.hyper_train == 'dropout':
-            init_hyper = args.dropout
-            model.Gaussian.dropout = Variable(torch.FloatTensor([init_hyper]), requires_grad=True)
-            if args.cuda: model.Gaussian.dropout = Variable(torch.FloatTensor([init_hyper]).cuda(), requires_grad=True)
-        elif args.hyper_train == 'various':
-            inits = np.zeros(3) - 3
-            model.various = Variable(torch.FloatTensor(inits).cuda(), requires_grad=True)
-        return init_hyper
 
-    def get_hyper_train():
-        if args.hyper_train == 'weight':
-            return model.weight_decay
-        elif args.hyper_train == 'all_weight':
-            return model.weight_decay
-        elif args.hyper_train == 'opt_data':
-            return model.opt_data
-        elif args.hyper_train == 'dropout':
-            return model.Gaussian.dropout
-        elif args.hyper_train == 'various':
-            return model.various
-
-    hyper = init_hyper_train()  # We need this when doing all_weight
+    hyper = init_hyper_train(args, model)  # We need this when doing all_weight
     if args.cuda:
         model = model.cuda()
         model.weight_decay = model.weight_decay.cuda()
@@ -150,15 +147,7 @@ def experiment(args):
     ############ Setup Optimizer
     # TODO (JON):  Add argument for other optimizers?
     init_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)  # , momentum=0.9)
-
-    # torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-    # KFACOptimizer(model)  #, TInv=1, TCov=1)
-    # optim.Adam(model.parameters(), lr=0.01)  #, momentum=0.9)  # , momentum=0.9)
-    # KFACOptimizer(model, TInv=1, TCov=1)  # , momentum=0, damping=0.001)  #, lr=0.0001)
-    # optim.RMSprop(model.parameters())  # , lr=args.lr)  #, momentum=args.momentum)
-    # sec_optimizer = KFACOptimizer(model, TInv=1, TCov=1, momentum=0, damping=0.0001, lr=0.0001)
-    hyper_optimizer = torch.optim.RMSprop([get_hyper_train()])  # , lr=args.lrh)  # try 0.1 as lr
-    # Adam([get_hyper_train()], lr=0.1) # , lr=0.01)  # , lr=args.lrh)  #, lr=0.1)  # , lr=1e-4) #, args.lrh)
+    hyper_optimizer = torch.optim.RMSprop([get_hyper_train(args, model)])  # , lr=args.lrh)  # try 0.1 as lr
 
     ############# Setup Saving
     # TODO (JON): Move these directory initializers to some other part.
@@ -175,11 +164,6 @@ def experiment(args):
     # Save command-line arguments
     with open(os.path.join(directory, 'args.yaml'), 'w') as f:
         yaml.dump(vars(args), f)
-
-    epoch_h_csv_logger = CSVLogger(
-        fieldnames=['epoch_h', 'train_loss', 'train_acc', 'val_loss', 'val_acc', 'test_loss', 'test_acc', 'hyper_param',
-                    'hp_update'],
-        filename=os.path.join(directory, 'epoch_h_log.csv'))
 
     ############## Setup Training
     def change_saturation_brightness(x, saturation, brightness):
@@ -218,9 +202,6 @@ def experiment(args):
         predicted_y = network(x)
         loss = F.cross_entropy(predicted_y, y, reduction=reduction)
         if args.hyper_train == 'opt_data':
-            # sigmoid_data = torch.sigmoid(get_hyper_train())
-            # hyper_sum = torch.sum(sigmoid_data)
-            # scale = min(1e-4, 0.05 * loss.detach() / hyper_sum.detach())
             regularizer = 0  # scale * hyper_sum  # scale * hyper_sum #  - torch.sum(x))
         else:
             regularizer = 0  # 1e-5 * torch.sum(torch.abs(get_hyper_train()))
@@ -292,18 +273,12 @@ def experiment(args):
         return acc, total_loss
 
     ############## Setup Inversion Algorithms
-
-    # TODO (JON):  We probably want CG_optimize and KFAC_optimize in a different file?
     KFAC_damping = 1e-2
     kfac_opt = KFACOptimizer(model, damping=KFAC_damping)  # sec_optimizer
 
     def KFAC_optimize(epoch_h):
-        """
-
-        :return:
-        """
         # set up placeholder for the partial derivative in each batch
-        total_d_val_loss_d_lambda = torch.zeros(get_hyper_train().size(0))
+        total_d_val_loss_d_lambda = torch.zeros(get_hyper_train(args, model).size(0))
         if args.cuda: total_d_val_loss_d_lambda = total_d_val_loss_d_lambda.cuda()
 
         num_weights = sum(p.numel() for p in model.parameters())
@@ -359,8 +334,8 @@ def experiment(args):
 
                 model.zero_grad(), hyper_optimizer.zero_grad()
                 flat_d_train_loss_d_theta.backward(flat_pre_conditioner)
-                if get_hyper_train().grad is not None:
-                    total_d_val_loss_d_lambda -= get_hyper_train().grad
+                if get_hyper_train(args, model).grad is not None:
+                    total_d_val_loss_d_lambda -= get_hyper_train(args, model).grad
                 if batch_idx >= args.train_batch_num: break
             total_d_val_loss_d_lambda /= (batch_idx + 1)
         elif args.hessian == 'KFAC':
@@ -391,21 +366,21 @@ def experiment(args):
                         current += size
                 model.zero_grad(), hyper_optimizer.zero_grad()
                 flat_d_train_loss_d_theta.backward(flat_pre_conditioner)
-                total_d_val_loss_d_lambda -= get_hyper_train().grad
+                total_d_val_loss_d_lambda -= get_hyper_train(args, model).grad
                 if batch_idx >= args.train_batch_num: break
             total_d_val_loss_d_lambda /= (batch_idx + 1)
         else:
             print(args.hessian)
             raise Exception(f"Passed {args.hessian}, not a valid choice")
 
-        direct_d_val_loss_d_lambda = torch.zeros(get_hyper_train().size(0))
+        direct_d_val_loss_d_lambda = torch.zeros(get_hyper_train(args, model).size(0))
         if args.cuda: direct_d_val_loss_d_lambda = direct_d_val_loss_d_lambda.cuda()
         model.train()
         for batch_idx, (x_val, y_val) in enumerate(val_loader):
             model.zero_grad(), hyper_optimizer.zero_grad()
             x_val, y_val = prepare_data(x_val, y_val)
             val_loss, _ = batch_loss(x_val, y_val, model, val_loss_func)
-            val_loss_grad = grad(val_loss, get_hyper_train(), allow_unused=True)
+            val_loss_grad = grad(val_loss, get_hyper_train(args, model), allow_unused=True)
             if val_loss_grad is not None and val_loss_grad[0] is not None:
                 direct_d_val_loss_d_lambda += gather_flat_grad(val_loss_grad)
             else:
@@ -413,12 +388,12 @@ def experiment(args):
             if batch_idx >= args.val_batch_num: break
         direct_d_val_loss_d_lambda /= (batch_idx + 1)
 
-        get_hyper_train().grad = direct_d_val_loss_d_lambda + total_d_val_loss_d_lambda
-        print("weight={}, update={}".format(get_hyper_train().norm(), get_hyper_train().grad.norm()))
+        get_hyper_train(args, model).grad = direct_d_val_loss_d_lambda + total_d_val_loss_d_lambda
+        print("weight={}, update={}".format(get_hyper_train(args, model).norm(), get_hyper_train(args, model).grad.norm()))
 
         hyper_optimizer.step()
         model.zero_grad(), hyper_optimizer.zero_grad()
-        return get_hyper_train(), get_hyper_train().grad
+        return get_hyper_train(args, model), get_hyper_train(args, model).grad
 
 
     ########### Perform the training
@@ -430,10 +405,10 @@ def experiment(args):
         if (epoch_h) % args.hyper_log_interval == 0:
             if args.hyper_train == 'opt_data':
                 if args.dataset == 'MNIST':
-                    save_learned(get_hyper_train().reshape(args.batch_size, imsize, imsize), True, args.batch_size,
+                    save_learned(get_hyper_train(args, model).reshape(args.batch_size, imsize, imsize), True, args.batch_size,
                                  args)
                 elif args.dataset == 'CIFAR10' or args.dataset == 'CIFAR100':
-                    save_learned(get_hyper_train().reshape(args.batch_size, in_channel, imsize, imsize), False,
+                    save_learned(get_hyper_train(args, model).reshape(args.batch_size, in_channel, imsize, imsize), False,
                                  args.batch_size, args)
             elif args.hyper_train == 'various':
                 print(f"saturation: {torch.sigmoid(model.various[0])}, brightness: {torch.sigmoid(model.various[1])}, decay: {torch.exp(model.various[2])}")
@@ -456,11 +431,6 @@ def experiment(args):
         #    optimizer = sec_optimizer
         for epoch in range(1, elementary_epochs + 1):
             global_step, epoch_train_loss = train(epoch, global_step)
-
-            epoch_row = {'epoch': str(epoch), 'train_loss': epoch_train_loss}
-            # , 'val_loss': str(val_loss), 'val_acc': str(val_corr)}
-            # epoch_csv_logger.writerow(**epoch_row)
-
             if np.isnan(epoch_train_loss):
                 print("Loss is nan, stop the loop")
                 break
