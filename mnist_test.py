@@ -207,14 +207,6 @@ def experiment(args):
     ##################### Setup model
     if args.model == "mlp":
         model = Net(args.num_layers, args.dropout, imsize, in_channel, args.l2, num_classes=num_classes)
-    elif args.model == "cnn":
-        model = CNN(args.num_layers, args.dropout, fc_shape, args.l2, in_channel, imsize, do_alexnet=False,
-                    num_classes=num_classes)
-    elif args.model == "alexnet":
-        model = CNN(args.num_layers, args.dropout, fc_shape, args.l2, in_channel, imsize, do_alexnet=True,
-                    num_classes=num_classes)
-    elif args.model == "resnet":
-        model = resnet44(dropout=args.dropout, num_classes=num_classes, in_channel=in_channel)
     else:
         raise Exception("bad model")
 
