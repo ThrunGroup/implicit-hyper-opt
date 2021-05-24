@@ -26,11 +26,6 @@ sys.path.insert(0, '/scratch/gobi1/datasets')
 
 
 def experiment(args):
-    """TODO (JON): Add an explanation of what this experiment is doing.
-
-    :param args:
-    :return:
-    """
     print(f"Running experiment with args: {args}")
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -61,9 +56,7 @@ def experiment(args):
     elif args.dataset == 'CIFAR10':
         num_train = args.datasize
         if num_train == -1: num_train = 45000
-        train_loader, val_loader, test_loader = load_cifar10(args.batch_size, num_train=num_train,
-                                                             augmentation=True,
-                                                             subset=[args.datasize, args.valsize, args.testsize])
+        train_loader, val_loader, test_loader = load_cifar10(args.batch_size, num_train=num_train, augmentation=True, subset=[args.datasize, args.valsize, args.testsize])
         in_channel = 3
         imsize = 32
         fc_shape = 250
@@ -71,17 +64,13 @@ def experiment(args):
     elif args.dataset == 'CIFAR100':
         num_train = args.datasize
         if num_train == -1: num_train = 45000
-        train_loader, val_loader, test_loader = load_cifar100(args.batch_size, num_train=num_train,
-                                                              augmentation=True,
-                                                              subset=[args.datasize, args.valsize, args.testsize])
+        train_loader, val_loader, test_loader = load_cifar100(args.batch_size, num_train=num_train, augmentation=True, subset=[args.datasize, args.valsize, args.testsize])
         in_channel = 3
         imsize = 32
         fc_shape = 250
         num_classes = 100
-
     elif args.dataset == 'HAM':
-        train_loader, val_loader, test_loader = load_ham(args.batch_size, augmentation=True,
-                                                         subset=[args.datasize, args.valsize, args.testsize])
+        train_loader, val_loader, test_loader = load_ham(args.batch_size, augmentation=True, subset=[args.datasize, args.valsize, args.testsize])
         num_classes = 7
         in_channel = 3
         imsize = 224
@@ -106,10 +95,6 @@ def experiment(args):
         raise Exception("bad model")
 
     def init_hyper_train():
-        """
-
-        :return:
-        """
         init_hyper = None
         if args.hyper_train == 'weight':
             init_hyper = args.l2
@@ -145,10 +130,6 @@ def experiment(args):
         return init_hyper
 
     def get_hyper_train():
-        """
-
-        :return:
-        """
         if args.hyper_train == 'weight':
             return model.weight_decay
         elif args.hyper_train == 'all_weight':
@@ -161,7 +142,6 @@ def experiment(args):
             return model.various
 
     hyper = init_hyper_train()  # We need this when doing all_weight
-
     if args.cuda:
         model = model.cuda()
         model.weight_decay = model.weight_decay.cuda()
@@ -209,14 +189,6 @@ def experiment(args):
         return x * saturation_noise.view(-1, 1, 1, 1) + brightness_noise.view(-1, 1, 1, 1)
 
     def train_loss_func(x, y, network, reduction='elementwise_mean'):
-        """
-
-        :param x:
-        :param y:
-        :param network:
-        :param reduction:
-        :return:
-        """
         predicted_y = None
         reg_loss = 0
         if args.hyper_train == 'weight':
@@ -243,14 +215,6 @@ def experiment(args):
         return F.cross_entropy(predicted_y, y, reduction=reduction) + reg_loss, predicted_y
 
     def val_loss_func(x, y, network, reduction='elementwise_mean'):
-        """
-
-        :param x:
-        :param y:
-        :param network:
-        :param reduction:
-        :return:
-        """
         predicted_y = network(x)
         loss = F.cross_entropy(predicted_y, y, reduction=reduction)
         if args.hyper_train == 'opt_data':
@@ -263,48 +227,18 @@ def experiment(args):
         return loss + regularizer, predicted_y
 
     def test_loss_func(x, y, network, reduction='elementwise_mean'):
-        """
-
-        :param x:
-        :param y:
-        :param network:
-        :param reduction:
-        :return:
-        """
         return val_loss_func(x, y, network, reduction=reduction)  # , predicted_y
 
     def prepare_data(x, y):
-        """
-
-        :param x:
-        :param y:
-        :return:
-        """
         if args.cuda: x, y = x.cuda(), y.cuda()
-
         x, y = Variable(x), Variable(y)
         return x, y
 
     def batch_loss(x, y, network, loss_func, reduction='elementwise_mean'):
-        """
-
-        :param x:
-        :param y:
-        :param network:
-        :param loss_func:
-        :param reduction:
-        :return:
-        """
         loss, predicted_y = loss_func(x, y, network, reduction=reduction)
         return loss, predicted_y
 
     def train(elementary_epoch, step):
-        """
-
-        :param elementary_epoch:
-        :param step:
-        :return:
-        """
         model.train()  # _train()
         total_loss = 0.0
         # TODO (JON): Sample a mini-batch
@@ -336,13 +270,6 @@ def experiment(args):
         return step, total_loss / (batch_idx + 1)
 
     def evaluate(step, data_loader, name=None):
-        """
-
-        :param step:
-        :param data_loader:
-        :param name:
-        :return:
-        """
         total_loss, correct = 0.0, 0
         with torch.no_grad():
             model.eval()  # TODO (JON): Do I need no_grad is using eval?
@@ -397,8 +324,6 @@ def experiment(args):
         elif args.hessian == 'identity' or args.hessian == 'direct':
             if args.hessian == 'identity':
                 pre_conditioner = d_val_loss_d_theta
-                # hessian_term = (pre_conditioner.view(1, -1) @ d_train_loss_d_theta.view(-1, 1) @ d_train_loss_d_theta.view(1, -1)).view(
-                #    -1)
                 flat_pre_conditioner = pre_conditioner  # 2*pre_conditioner - args.lr*hessian_term
             elif args.hessian == 'direct':
                 assert args.dataset == 'MNIST' and args.model == 'mlp' and args.num_layers == 0, "Don't do direct for large problems."
@@ -419,20 +344,6 @@ def experiment(args):
                     if batch_idx >= args.train_batch_num: break
                 hessian /= (batch_idx + 1)
                 inv_hessian = torch.pinverse(hessian)
-                if args.graph_hessian:
-                    def downsample(h, desired_size):
-                        downsample_factor = 7850 // desired_size
-                        downsampler = torch.nn.MaxPool2d(downsample_factor, stride=downsample_factor)
-                        x_dim = h.shape[-1]
-                        h = downsampler(h.view(1, 1, x_dim, x_dim))
-                        new_xdim = h.shape[-1]
-                        return h.view(new_xdim, new_xdim)
-
-                    print(torch.max(torch.abs(hessian)), torch.max(torch.abs(inv_hessian)))
-                    save_hessian(torch.clamp(torch.abs(downsample(hessian, 512)), 0, 0.2),
-                                 name=f'normal_epoch_h={epoch_h}')
-                    save_hessian(torch.clamp(torch.abs(downsample(inv_hessian, 128)), 0.0, 4),
-                                 name=f'inverse_epoch_h={epoch_h}')
                 pre_conditioner = d_val_loss_d_theta @ inv_hessian
                 flat_pre_conditioner = pre_conditioner
 
@@ -485,7 +396,7 @@ def experiment(args):
             total_d_val_loss_d_lambda /= (batch_idx + 1)
         else:
             print(args.hessian)
-            raise Exception("Need to call KFAC, Mo deleted other algos")
+            raise Exception(f"Passed {args.hessian}, not a valid choice")
 
         direct_d_val_loss_d_lambda = torch.zeros(get_hyper_train().size(0))
         if args.cuda: direct_d_val_loss_d_lambda = direct_d_val_loss_d_lambda.cuda()
@@ -516,9 +427,6 @@ def experiment(args):
     hp_k, update = 0, 0
     for epoch_h in range(0, args.hepochs + 1):
         print(f"Hyper epoch: {epoch_h}")
-        epoch_csv_logger = CSVLogger(fieldnames=['epoch', 'train_loss', 'val_loss', 'val_acc'],
-                                     filename=os.path.join(directory, f'epoch_log_{epoch_h}.csv'))
-
         if (epoch_h) % args.hyper_log_interval == 0:
             if args.hyper_train == 'opt_data':
                 if args.dataset == 'MNIST':
@@ -528,25 +436,12 @@ def experiment(args):
                     save_learned(get_hyper_train().reshape(args.batch_size, in_channel, imsize, imsize), False,
                                  args.batch_size, args)
             elif args.hyper_train == 'various':
-                print(
-                    f"saturation: {torch.sigmoid(model.various[0])}, brightness: {torch.sigmoid(model.various[1])}, decay: {torch.exp(model.various[2])}")
+                print(f"saturation: {torch.sigmoid(model.various[0])}, brightness: {torch.sigmoid(model.various[1])}, decay: {torch.exp(model.various[2])}")
             # torch.save(model.state_dict(), f'{directory}/model_{epoch_h}.pkl')
             eval_train_corr, eval_train_loss = evaluate(global_step, train_loader, 'train')
             # TODO (JON):  I don't know if we want normal train loss, or eval?
             eval_val_corr, eval_val_loss = evaluate(epoch_h, val_loader, 'valid')
             eval_test_corr, eval_test_loss = evaluate(epoch_h, test_loader, 'test')
-            epoch_row = {
-                            # 'hyper_param': str(hp_k),
-                            'train_loss': eval_train_loss,
-                            'train_acc': str(eval_train_corr),
-                            'val_loss': str(eval_val_loss),
-                            'val_acc': str(eval_val_corr),
-                            'test_loss': str(eval_test_loss),
-                            'test_acc': str(eval_test_corr),
-                            # 'epoch_h': str(epoch_h),
-                            # 'hp_update': str(update),
-                        }
-            # epoch_h_csv_logger.writerow(**epoch_row)
             if args.break_perfect_val and eval_val_corr >= 0.999 and eval_train_corr >= 0.999:
                 break
 
@@ -577,21 +472,6 @@ def experiment(args):
         #     continue
 
         hp_k, update = KFAC_optimize(epoch_h)
-
-        # print(f"hyper parameter={hp_k}")
-
-
-def save_hessian(hessian, name):
-    print("saving...")
-    fig = plt.figure()
-    data = hessian.detach().cpu().numpy()
-    plt.imshow(data, cmap='bwr', interpolation='none')
-    # plt.title(f"Ground Truth: {i}", fontsize=4)
-    plt.xticks([])
-    plt.yticks([])
-    plt.draw()
-    fig.savefig('images/hessian_' + str(name) + '.pdf')
-    plt.close(fig)
 
 
 def save_learned(datas, is_mnist, batch_size, args):
