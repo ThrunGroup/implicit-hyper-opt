@@ -69,6 +69,109 @@ def get_hyper_train(args, model):
         return model.various
 
 
+def train_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
+    predicted_y = None
+    reg_loss = 0
+    if args.hyper_train == 'weight':
+        predicted_y = network(x)
+        reg_loss = network.L2_loss()
+    elif args.hyper_train == 'all_weight':
+        predicted_y = network(x)
+        reg_loss = network.all_L2_loss()
+    elif args.hyper_train == 'opt_data':
+        opt_x = network.opt_data.reshape(args.batch_size, in_channel, imsize, imsize)
+        predicted_y = network.forward(opt_x)
+        y = model.opt_data_y
+        reg_loss = network.L2_loss()
+    elif args.hyper_train == 'dropout':
+        predicted_y = network(x)
+    elif args.hyper_train == 'various':
+        x = change_saturation_brightness(x, model.various[0], model.various[1])
+        predicted_y = network(x)
+        model.weight_decay = -3  # model.various[2]
+        reg_loss = network.L2_loss()
+    return F.cross_entropy(predicted_y, y, reduction=reduction) + reg_loss, predicted_y
+
+
+def val_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
+    predicted_y = network(x)
+    loss = F.cross_entropy(predicted_y, y, reduction=reduction)
+    if args.hyper_train == 'opt_data':
+        regularizer = 0  # scale * hyper_sum  # scale * hyper_sum #  - torch.sum(x))
+    else:
+        regularizer = 0  # 1e-5 * torch.sum(torch.abs(get_hyper_train()))
+    return loss + regularizer, predicted_y
+
+
+def test_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
+    return val_loss_func(args, model, x, y, network, reduction=reduction)  # , predicted_y
+
+
+def prepare_data(args, x, y):
+    if args.cuda: x, y = x.cuda(), y.cuda()
+    x, y = Variable(x), Variable(y)
+    return x, y
+
+
+def batch_loss(args, model, x, y, network, loss_func, reduction='elementwise_mean'):
+    loss, predicted_y = loss_func(args, model, x, y, network, reduction=reduction)
+    return loss, predicted_y
+
+def train(args, model, train_loader, optimizer, train_loss_func, kfac_opt, elementary_epoch, step):
+    model.train()  # _train()
+    total_loss = 0.0
+    # TODO (JON): Sample a mini-batch
+    # TODO (JON): Change x to input
+    for batch_idx, (x, y) in enumerate(train_loader):
+        # Take a gradient step for this mini-batch
+        optimizer.zero_grad()
+        if args.hessian == 'KFAC':
+            kfac_opt.zero_grad()
+        x, y = prepare_data(args, x, y)
+        loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
+        loss.backward()
+        optimizer.step()
+        if args.hessian == 'KFAC':
+            kfac_opt.fake_step()
+
+        total_loss += loss.item()
+        step += 1
+        if batch_idx >= args.train_batch_num: break
+
+    # Occasionally record stats.
+    if elementary_epoch % args.elementary_log_interval == 0:
+        # TODO (JON): Clean up this print?
+        # batch_num = batch_idx * len(x)
+        # num_batches = len(train_loader.dataset)
+        # [{batch_num}/{num_batches}]
+        print(f'Train Epoch: {elementary_epoch} \tLoss: {total_loss:.6f}')
+
+    return step, total_loss / (batch_idx + 1)
+
+
+def evaluate(args, model, step, data_loader, name=None):
+    total_loss, correct = 0.0, 0
+    with torch.no_grad():
+        model.eval()  # TODO (JON): Do I need no_grad is using eval?
+
+        # TODO: Sample a minibatch here?
+        for batch_idx, (x, y) in enumerate(data_loader):
+            x, y = prepare_data(args, x, y)
+            loss, predicted_y = batch_loss(args, model, x, y, model, test_loss_func)
+            total_loss += loss.item()
+
+            pred = predicted_y.data.max(1, keepdim=True)[1]  # get the index of the max log-probability
+            correct += pred.eq(y.data.view_as(pred)).cpu().sum()
+            if batch_idx >= args.eval_batch_num: break
+        total_loss /= (batch_idx + 1)
+
+    # TODO (JON): Clean up print and logging?
+    data_size = args.batch_size * (batch_idx + 1)
+    acc = float(correct) / data_size
+    print(f'Evaluate {name}, {step}: Average loss: {total_loss:.4f}, Accuracy: {correct}/{data_size} ({acc}%)')
+    return acc, total_loss
+
+################################################################################
 def experiment(args):
     print(f"Running experiment with args: {args}")
     args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -114,7 +217,6 @@ def experiment(args):
     else:
         raise Exception("bad model")
 
-
     hyper = init_hyper_train(args, model)  # We need this when doing all_weight
     if args.cuda:
         model = model.cuda()
@@ -133,105 +235,6 @@ def experiment(args):
         brightness_noise = torch.randn(x.shape[0]).cuda() * torch.exp(brightness)
         return x * saturation_noise.view(-1, 1, 1, 1) + brightness_noise.view(-1, 1, 1, 1)
 
-    def train_loss_func(x, y, network, reduction='elementwise_mean'):
-        predicted_y = None
-        reg_loss = 0
-        if args.hyper_train == 'weight':
-            predicted_y = network(x)
-            reg_loss = network.L2_loss()
-        elif args.hyper_train == 'all_weight':
-            predicted_y = network(x)
-            reg_loss = network.all_L2_loss()
-        elif args.hyper_train == 'opt_data':
-            opt_x = network.opt_data.reshape(args.batch_size, in_channel, imsize, imsize)
-            # opt_std = torch.std(opt_x.detach())
-            # drop = torch.nn.Dropout(p=0.5)
-            # opt_x = drop(opt_x)  # + torch.randn(opt_x.shape).cuda() * opt_std
-            predicted_y = network.forward(opt_x)
-            y = model.opt_data_y
-            reg_loss = network.L2_loss()
-        elif args.hyper_train == 'dropout':
-            predicted_y = network(x)
-        elif args.hyper_train == 'various':
-            x = change_saturation_brightness(x, model.various[0], model.various[1])
-            predicted_y = network(x)
-            model.weight_decay = -3  # model.various[2]
-            reg_loss = network.L2_loss()
-        return F.cross_entropy(predicted_y, y, reduction=reduction) + reg_loss, predicted_y
-
-    def val_loss_func(x, y, network, reduction='elementwise_mean'):
-        predicted_y = network(x)
-        loss = F.cross_entropy(predicted_y, y, reduction=reduction)
-        if args.hyper_train == 'opt_data':
-            regularizer = 0  # scale * hyper_sum  # scale * hyper_sum #  - torch.sum(x))
-        else:
-            regularizer = 0  # 1e-5 * torch.sum(torch.abs(get_hyper_train()))
-        return loss + regularizer, predicted_y
-
-    def test_loss_func(x, y, network, reduction='elementwise_mean'):
-        return val_loss_func(x, y, network, reduction=reduction)  # , predicted_y
-
-    def prepare_data(x, y):
-        if args.cuda: x, y = x.cuda(), y.cuda()
-        x, y = Variable(x), Variable(y)
-        return x, y
-
-    def batch_loss(x, y, network, loss_func, reduction='elementwise_mean'):
-        loss, predicted_y = loss_func(x, y, network, reduction=reduction)
-        return loss, predicted_y
-
-    def train(elementary_epoch, step):
-        model.train()  # _train()
-        total_loss = 0.0
-        # TODO (JON): Sample a mini-batch
-        # TODO (JON): Change x to input
-        for batch_idx, (x, y) in enumerate(train_loader):
-            # Take a gradient step for this mini-batch
-            optimizer.zero_grad()
-            if args.hessian == 'KFAC':
-                kfac_opt.zero_grad()
-            x, y = prepare_data(x, y)
-            loss, _ = batch_loss(x, y, model, train_loss_func)
-            loss.backward()
-            optimizer.step()
-            if args.hessian == 'KFAC':
-                kfac_opt.fake_step()
-
-            total_loss += loss.item()
-            step += 1
-            if batch_idx >= args.train_batch_num: break
-
-        # Occasionally record stats.
-        if epoch % args.elementary_log_interval == 0:
-            # TODO (JON): Clean up this print?
-            # batch_num = batch_idx * len(x)
-            # num_batches = len(train_loader.dataset)
-            # [{batch_num}/{num_batches}]
-            print(f'Train Epoch: {elementary_epoch} \tLoss: {total_loss:.6f}')
-
-        return step, total_loss / (batch_idx + 1)
-
-    def evaluate(step, data_loader, name=None):
-        total_loss, correct = 0.0, 0
-        with torch.no_grad():
-            model.eval()  # TODO (JON): Do I need no_grad is using eval?
-
-            # TODO: Sample a minibatch here?
-            for batch_idx, (x, y) in enumerate(data_loader):
-                x, y = prepare_data(x, y)
-                loss, predicted_y = batch_loss(x, y, model, test_loss_func)
-                total_loss += loss.item()
-
-                pred = predicted_y.data.max(1, keepdim=True)[1]  # get the index of the max log-probability
-                correct += pred.eq(y.data.view_as(pred)).cpu().sum()
-                if batch_idx >= args.eval_batch_num: break
-            total_loss /= (batch_idx + 1)
-
-        # TODO (JON): Clean up print and logging?
-        data_size = args.batch_size * (batch_idx + 1)
-        acc = float(correct) / data_size
-        print(f'Evaluate {name}, {step}: Average loss: {total_loss:.4f}, Accuracy: {correct}/{data_size} ({acc}%)')
-        return acc, total_loss
 
     ############## Setup Inversion Algorithms
     KFAC_damping = 1e-2
@@ -247,8 +250,8 @@ def experiment(args):
         model.train()
         for batch_idx, (x, y) in enumerate(val_loader):
             model.zero_grad()
-            x, y = prepare_data(x, y)
-            val_loss, _ = batch_loss(x, y, model, val_loss_func)
+            x, y = prepare_data(args, x, y)
+            val_loss, _ = batch_loss(args, model, x, y, model, val_loss_func)
             val_loss_grad = grad(val_loss, model.parameters())
             d_val_loss_d_theta += gather_flat_grad(val_loss_grad)
             if batch_idx >= args.val_batch_num: break
@@ -266,8 +269,8 @@ def experiment(args):
                 hessian = torch.zeros(
                     num_weights, num_weights).cuda()  # grad(grad(train_loss, model.parameters()), model.parameters())
                 for batch_idx, (x, y) in enumerate(train_loader):
-                    x, y = prepare_data(x, y)
-                    train_loss, _ = batch_loss(x, y, model, train_loss_func)
+                    x, y = prepare_data(args, x, y)
+                    train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
                     # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
 
                     model.zero_grad(), hyper_optimizer.zero_grad()
@@ -285,8 +288,8 @@ def experiment(args):
 
             model.train()  # train()
             for batch_idx, (x, y) in enumerate(train_loader):
-                x, y = prepare_data(x, y)
-                train_loss, _ = batch_loss(x, y, model, train_loss_func)
+                x, y = prepare_data(args, x, y)
+                train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
                 # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
 
                 model.zero_grad(), hyper_optimizer.zero_grad()
@@ -305,8 +308,8 @@ def experiment(args):
             for batch_idx, (x, y) in enumerate(train_loader):
                 model.train()
                 model.zero_grad(), hyper_optimizer.zero_grad()
-                x, y = prepare_data(x, y)
-                train_loss, _ = batch_loss(x, y, model, train_loss_func)
+                x, y = prepare_data(args, x, y)
+                train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
                 # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
                 d_train_loss_d_theta = grad(train_loss, model.parameters(), create_graph=True)
                 flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)
@@ -339,8 +342,8 @@ def experiment(args):
         model.train()
         for batch_idx, (x_val, y_val) in enumerate(val_loader):
             model.zero_grad(), hyper_optimizer.zero_grad()
-            x_val, y_val = prepare_data(x_val, y_val)
-            val_loss, _ = batch_loss(x_val, y_val, model, val_loss_func)
+            x_val, y_val = prepare_data(args, x_val, y_val)
+            val_loss, _ = batch_loss(args, model, x_val, y_val, model, val_loss_func)
             val_loss_grad = grad(val_loss, get_hyper_train(args, model), allow_unused=True)
             if val_loss_grad is not None and val_loss_grad[0] is not None:
                 direct_d_val_loss_d_lambda += gather_flat_grad(val_loss_grad)
@@ -373,10 +376,10 @@ def experiment(args):
                                  args.batch_size, args)
             elif args.hyper_train == 'various':
                 print(f"saturation: {torch.sigmoid(model.various[0])}, brightness: {torch.sigmoid(model.various[1])}, decay: {torch.exp(model.various[2])}")
-            eval_train_corr, eval_train_loss = evaluate(global_step, train_loader, 'train')
+            eval_train_corr, eval_train_loss = evaluate(args, model, global_step, train_loader, 'train')
             # TODO (JON):  I don't know if we want normal train loss, or eval?
-            eval_val_corr, eval_val_loss = evaluate(epoch_h, val_loader, 'valid')
-            eval_test_corr, eval_test_loss = evaluate(epoch_h, test_loader, 'test')
+            eval_val_corr, eval_val_loss = evaluate(args, model, epoch_h, val_loader, 'valid')
+            eval_test_corr, eval_test_loss = evaluate(args, model, epoch_h, test_loader, 'test')
             if args.break_perfect_val and eval_val_corr >= 0.999 and eval_train_corr >= 0.999:
                 break
 
@@ -390,7 +393,7 @@ def experiment(args):
         # else:
         #    optimizer = sec_optimizer
         for epoch in range(1, elementary_epochs + 1):
-            global_step, epoch_train_loss = train(epoch, global_step)
+            global_step, epoch_train_loss = train(args, model, train_loader, optimizer, train_loss_func, kfac_opt, epoch, global_step)
             if np.isnan(epoch_train_loss):
                 print("Loss is nan, stop the loop")
                 break
