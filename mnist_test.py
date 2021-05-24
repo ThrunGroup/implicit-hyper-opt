@@ -1050,16 +1050,16 @@ if __name__ == '__main__':
         # TODO: Try other optimizers! Ex. Adam?
         for dataset in ['MNIST']:  #'MNIST', 'CIFAR10']:  # 'MNIST',
             for model in ['mlp']: #'mlp', 'alexnet', 'resnet']:  # 'mlp', 'cnn',
-                layer_selection = [0]
-                if model == 'mlp':
-                    layer_selection = [1, 0]
+                layer_selection = [1]
+#                 if model == 'mlp':
+#                     layer_selection = [1, 0]
 
                 for num_layers in layer_selection:
                     args = setup_overfit_validation(dataset, model, num_layers)
                     args.hyper_log_interval = 1
                     args.testsize = 50
                     args.break_perfect_val = True
-                    args.hepochs = 100 # TODO: I SHRUNK THIS
+                    args.hepochs = 500 # TODO: I SHRUNK THIS
                     args.hessian = 'identity'
                     if dataset == 'CIFAR10':
                         args.lrh = 1e-2
