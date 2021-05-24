@@ -56,6 +56,7 @@ def init_hyper_train(args, model):
         model.various = Variable(torch.FloatTensor(inits).cuda(), requires_grad=True)
     return init_hyper
 
+
 def get_hyper_train(args, model):
     if args.hyper_train == 'weight':
         return model.weight_decay
@@ -117,6 +118,7 @@ def batch_loss(args, model, x, y, network, loss_func, reduction='mean'):
     loss, predicted_y = loss_func(args, model, x, y, network, reduction=reduction)
     return loss, predicted_y
 
+
 def train(args, model, train_loader, optimizer, train_loss_func, kfac_opt, elementary_epoch, step):
     model.train()  # _train()
     total_loss = 0.0
@@ -165,6 +167,7 @@ def evaluate(args, model, step, data_loader, name=None):
     acc = float(correct) / data_size
     print(f'Evaluate {name}, {step}: Average loss: {total_loss:.4f}, Accuracy: {correct}/{data_size} ({acc}%)')
     return acc, total_loss
+
 
 def change_saturation_brightness(x, saturation, brightness):
     # print(saturation, brightness)
@@ -296,7 +299,6 @@ def KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_o
 def experiment(args):
     print(f"Running experiment with args: {args}")
     args.cuda = not args.no_cuda and torch.cuda.is_available()
-
     args.train_batch_num -= 1
     args.val_batch_num -= 1
     args.eval_batch_num -= 1
@@ -481,6 +483,7 @@ def setup_overfit_images():
                 # TODO: Idea - identical rmsprop on both?
                 argss += [args]
     return argss
+
 
 def get_args():
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
