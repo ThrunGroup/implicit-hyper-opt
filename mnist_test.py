@@ -69,7 +69,7 @@ def get_hyper_train(args, model):
         return model.various
 
 
-def train_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
+def train_loss_func(args, model, x, y, network, reduction='mean'):
     predicted_y = None
     reg_loss = 0
     if args.hyper_train == 'weight':
@@ -93,7 +93,7 @@ def train_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
     return F.cross_entropy(predicted_y, y, reduction=reduction) + reg_loss, predicted_y
 
 
-def val_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
+def val_loss_func(args, model, x, y, network, reduction='mean'):
     predicted_y = network(x)
     loss = F.cross_entropy(predicted_y, y, reduction=reduction)
     if args.hyper_train == 'opt_data':
@@ -103,7 +103,7 @@ def val_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
     return loss + regularizer, predicted_y
 
 
-def test_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
+def test_loss_func(args, model, x, y, network, reduction='mean'):
     return val_loss_func(args, model, x, y, network, reduction=reduction)  # , predicted_y
 
 
@@ -113,7 +113,7 @@ def prepare_data(args, x, y):
     return x, y
 
 
-def batch_loss(args, model, x, y, network, loss_func, reduction='elementwise_mean'):
+def batch_loss(args, model, x, y, network, loss_func, reduction='mean'):
     loss, predicted_y = loss_func(args, model, x, y, network, reduction=reduction)
     return loss, predicted_y
 
@@ -138,12 +138,7 @@ def train(args, model, train_loader, optimizer, train_loss_func, kfac_opt, eleme
         step += 1
         if batch_idx >= args.train_batch_num: break
 
-    # Occasionally record stats.
     if elementary_epoch % args.elementary_log_interval == 0:
-        # TODO (JON): Clean up this print?
-        # batch_num = batch_idx * len(x)
-        # num_batches = len(train_loader.dataset)
-        # [{batch_num}/{num_batches}]
         print(f'Train Epoch: {elementary_epoch} \tLoss: {total_loss:.6f}')
 
     return step, total_loss / (batch_idx + 1)
@@ -170,6 +165,12 @@ def evaluate(args, model, step, data_loader, name=None):
     acc = float(correct) / data_size
     print(f'Evaluate {name}, {step}: Average loss: {total_loss:.4f}, Accuracy: {correct}/{data_size} ({acc}%)')
     return acc, total_loss
+
+def change_saturation_brightness(x, saturation, brightness):
+    # print(saturation, brightness)
+    saturation_noise = 1.0 + torch.randn(x.shape[0]).cuda() * torch.exp(saturation)
+    brightness_noise = torch.randn(x.shape[0]).cuda() * torch.exp(brightness)
+    return x * saturation_noise.view(-1, 1, 1, 1) + brightness_noise.view(-1, 1, 1, 1)
 
 ################################################################################
 def experiment(args):
@@ -227,14 +228,6 @@ def experiment(args):
     # TODO (JON):  Add argument for other optimizers?
     init_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)  # , momentum=0.9)
     hyper_optimizer = torch.optim.RMSprop([get_hyper_train(args, model)])  # , lr=args.lrh)  # try 0.1 as lr
-
-    ############## Setup Training
-    def change_saturation_brightness(x, saturation, brightness):
-        # print(saturation, brightness)
-        saturation_noise = 1.0 + torch.randn(x.shape[0]).cuda() * torch.exp(saturation)
-        brightness_noise = torch.randn(x.shape[0]).cuda() * torch.exp(brightness)
-        return x * saturation_noise.view(-1, 1, 1, 1) + brightness_noise.view(-1, 1, 1, 1)
-
 
     ############## Setup Inversion Algorithms
     KFAC_damping = 1e-2
