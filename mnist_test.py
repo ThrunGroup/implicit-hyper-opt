@@ -96,31 +96,8 @@ def experiment(args):
         imsize = 28
         fc_shape = 800
         num_classes = 10
-    elif args.dataset == 'CIFAR10':
-        num_train = args.datasize
-        if num_train == -1: num_train = 45000
-        train_loader, val_loader, test_loader = load_cifar10(args.batch_size, num_train=num_train, augmentation=True, subset=[args.datasize, args.valsize, args.testsize])
-        in_channel = 3
-        imsize = 32
-        fc_shape = 250
-        num_classes = 10
-    elif args.dataset == 'CIFAR100':
-        num_train = args.datasize
-        if num_train == -1: num_train = 45000
-        train_loader, val_loader, test_loader = load_cifar100(args.batch_size, num_train=num_train, augmentation=True, subset=[args.datasize, args.valsize, args.testsize])
-        in_channel = 3
-        imsize = 32
-        fc_shape = 250
-        num_classes = 100
-    elif args.dataset == 'HAM':
-        train_loader, val_loader, test_loader = load_ham(args.batch_size, augmentation=True, subset=[args.datasize, args.valsize, args.testsize])
-        num_classes = 7
-        in_channel = 3
-        imsize = 224
-        fc_shape = None
     else:
-        train_loader, val_loader, test_loader = None, None, None
-        in_channel, imsize, fc_shape, num_classes = None, None, None, None
+        raise Exception("Must choose MNIST dataset")
     # TODO (JON): Right now we are not using the test loader for anything.  Should evaluate it occasionally.
 
     ##################### Setup model
@@ -148,22 +125,6 @@ def experiment(args):
     # TODO (JON):  Add argument for other optimizers?
     init_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)  # , momentum=0.9)
     hyper_optimizer = torch.optim.RMSprop([get_hyper_train(args, model)])  # , lr=args.lrh)  # try 0.1 as lr
-
-    ############# Setup Saving
-    # TODO (JON): Move these directory initializers to some other part.
-    directory_name_vals = {'model': args.model, 'lrh': 0.1, 'jacob': args.jacobian,
-                           'hessian': args.hessian, 'size': args.datasize, 'valsize': args.valsize,
-                           'dataset': args.dataset, 'hyper_train': args.hyper_train, 'layers': args.num_layers,
-                           'restart': args.restart, 'hyper_value': hyper}
-    directory = ""
-    for key, val in directory_name_vals.items():
-        directory += f"{key}={val}_"
-
-    if not os.path.exists(directory): os.mkdir(directory, 0o0755)
-
-    # Save command-line arguments
-    with open(os.path.join(directory, 'args.yaml'), 'w') as f:
-        yaml.dump(vars(args), f)
 
     ############## Setup Training
     def change_saturation_brightness(x, saturation, brightness):
@@ -412,7 +373,6 @@ def experiment(args):
                                  args.batch_size, args)
             elif args.hyper_train == 'various':
                 print(f"saturation: {torch.sigmoid(model.various[0])}, brightness: {torch.sigmoid(model.various[1])}, decay: {torch.exp(model.various[2])}")
-            # torch.save(model.state_dict(), f'{directory}/model_{epoch_h}.pkl')
             eval_train_corr, eval_train_loss = evaluate(global_step, train_loader, 'train')
             # TODO (JON):  I don't know if we want normal train loss, or eval?
             eval_val_corr, eval_val_loss = evaluate(epoch_h, val_loader, 'valid')
