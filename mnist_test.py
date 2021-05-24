@@ -494,9 +494,7 @@ def setup_overfit_images():
                 argss += [args]
     return argss
 
-if __name__ == '__main__':
-    torch.manual_seed(0)
-
+def get_args():
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
 
     # Dataset parameters
@@ -595,17 +593,17 @@ if __name__ == '__main__':
                         help='random seed (default: 1)')
 
     args = parser.parse_args()
+    return args
 
+
+if __name__ == '__main__':
+    torch.manual_seed(0)
+    args = get_args()
     super_execute_argss = setup_overfit_images()
     # TODO (JON): I put different elementary optimizer and inverter
-    do_multiprocess = False
-    if do_multiprocess:
-        p = Pool(min(4, len(super_execute_argss)))  # Set this to whatever the GPU can handle
-        p.map(experiment, super_execute_argss)
-    else:
-        for execute_args in super_execute_argss:
-            print(execute_args)
-            experiment(execute_args)
+    for execute_args in super_execute_argss:
+        print(execute_args)
+        experiment(execute_args)
 
     # TODO: Separate out the part of the code that specifies arguments for experiments!
     # TODO: Also, we should have plot_utils load paths from the arguments we provide?
