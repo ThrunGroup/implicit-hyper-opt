@@ -594,6 +594,7 @@ def experiment(args):
                 if batch_idx >= args.train_batch_num: break
             total_d_val_loss_d_lambda /= (batch_idx + 1)
 
+
         direct_d_val_loss_d_lambda = torch.zeros(get_hyper_train().size(0))
         if args.cuda: direct_d_val_loss_d_lambda = direct_d_val_loss_d_lambda.cuda()
         model.train()
@@ -886,7 +887,8 @@ if __name__ == '__main__':
                         help='whether to reset parameter')
     parser.add_argument('--jacobian', type=str, default="direct", choices=['direct', 'product'],
                         help='which method to compute jacobian')
-    parser.add_argument('--hessian', type=str, default="identity", choices=['direct', 'KFAC', 'identity', 'zero'],
+    parser.add_argument('--hessian', type=str, default="identity",
+                        choices=['direct', 'KFAC', 'identity', 'zero', 'NEUMANN'],
                         help='which method to compute hessian')
     parser.add_argument('--hyper_train', type=str, default="opt_data",
                         choices=['weight', 'all_weight', 'dropout', 'opt_data', 'various'],
@@ -1044,7 +1046,7 @@ if __name__ == '__main__':
         argss = []
         # TODO: Try other optimizers! Ex. Adam?
         for dataset in ['CIFAR10']:  #'MNIST', 'CIFAR10']:  # 'MNIST',
-            for model in ['alexnet']:  #'mlp', 'alexnet', 'resnet']:  # 'mlp', 'cnn',
+            for model in ['mlp', 'alexnet']:  #'mlp', 'alexnet', 'resnet']:  # 'mlp', 'cnn',
                 layer_selection = [0]
                 if model == 'mlp':
                     layer_selection = [1, 0]
