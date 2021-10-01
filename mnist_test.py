@@ -470,7 +470,6 @@ def experiment(args):
                     x, y = prepare_data(x, y)
                     train_loss, _ = batch_loss(x, y, model, train_loss_func)
                     # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-
                     model.zero_grad(), hyper_optimizer.zero_grad()
                     d_train_loss_d_theta = grad(train_loss, model.parameters(), create_graph=True, retain_graph=True)
                     flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)
@@ -594,6 +593,47 @@ def experiment(args):
                 if batch_idx >= args.train_batch_num: break
             total_d_val_loss_d_lambda /= (batch_idx + 1)
 
+        # Jay: Implementing Neumean series inverse approximation
+        elif args.hessian == 'NEUMANN':
+            flat_d_train_loss_d_theta = torch.zeros(num_weights).cuda()
+            model.train()
+            for batch_idx, (x, y) in enumerate(train_loader):
+                x, y = prepare_data(x, y)
+                train_loss, _ = batch_loss(x, y, model, train_loss_func)
+                # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
+
+                model.zero_grad(), hyper_optimizer.zero_grad()
+                d_train_loss_d_theta = grad(train_loss, model.parameters(), create_graph=True)
+                flat_d_train_loss_d_theta += gather_flat_grad(d_train_loss_d_theta)
+            flat_d_train_loss_d_theta /= (batch_idx + 1)
+
+            pre_conditioner = d_val_loss_d_theta.detach()  # d_val_loss_d_theta is already a flat tensor
+            counter = pre_conditioner
+            i = 0
+            while i < args.num_neumann:
+                old_counter = counter
+                hessian_term = gather_flat_grad(grad(flat_d_train_loss_d_theta, model.parameters(),
+                                                     grad_outputs=counter.view(-1), retain_graph=True))
+                counter = old_counter - args.lr * hessian_term
+                pre_conditioner += counter
+                i += 1
+
+            model.train()  # train()
+            for batch_idx, (x, y) in enumerate(train_loader):
+                x, y = prepare_data(x, y)
+                train_loss, _ = batch_loss(x, y, model, train_loss_func)
+                # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
+
+                model.zero_grad(), hyper_optimizer.zero_grad()
+                d_train_loss_d_theta = grad(train_loss, model.parameters(), create_graph=True)
+                flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)
+
+                model.zero_grad(), hyper_optimizer.zero_grad()
+                flat_d_train_loss_d_theta.backward(pre_conditioner)
+                if get_hyper_train().grad is not None:
+                    total_d_val_loss_d_lambda -= get_hyper_train().grad
+                if batch_idx >= args.train_batch_num: break
+            total_d_val_loss_d_lambda /= (batch_idx + 1)
 
         direct_d_val_loss_d_lambda = torch.zeros(get_hyper_train().size(0))
         if args.cuda: direct_d_val_loss_d_lambda = direct_d_val_loss_d_lambda.cuda()
@@ -1045,8 +1085,8 @@ if __name__ == '__main__':
     def setup_overfit_images():
         argss = []
         # TODO: Try other optimizers! Ex. Adam?
-        for dataset in ['CIFAR10']:  #'MNIST', 'CIFAR10']:  # 'MNIST',
-            for model in ['mlp', 'alexnet']:  #'mlp', 'alexnet', 'resnet']:  # 'mlp', 'cnn',
+        for dataset in ['MNIST', 'CIFAR10']:  # 'MNIST', 'CIFAR10']:  # 'MNIST',
+            for model in ['mlp', 'alexnet']:  # 'mlp', 'alexnet', 'resnet']:  # 'mlp', 'cnn',
                 layer_selection = [0]
                 if model == 'mlp':
                     layer_selection = [1, 0]
@@ -1056,7 +1096,8 @@ if __name__ == '__main__':
                     args.testsize = 50
                     args.break_perfect_val = True
                     args.hepochs = 100000  # TODO: I SHRUNK THIS
-                    args.hessian = 'identity'
+                    args.hessian = 'NEUMANN'
+                    args.num_neumann = 3  # Jay: to experiment neuman
                     if dataset == 'CIFAR10':
                         args.lrh = 1e-2
                     elif dataset == 'MNIST':
@@ -1097,7 +1138,7 @@ if __name__ == '__main__':
     # temp_args.l2 = -10
     # super_execute_argss = [temp_args]
 
-    #super_execute_argss = [setup_overfit_validation('CIFAR10', 'resnet',
+    # super_execute_argss = [setup_overfit_validation('CIFAR10', 'resnet',
     #                                                0)]  # execute_argss_learn_images  #setup_overfit_images()  #setup_inversion_comparison_large()
     super_execute_argss = setup_overfit_images()
     # TODO (JON): I put different elementary optimizer and inverter
