@@ -1,0 +1,10 @@
+matplotlib
+numpy
+scipy
+ipdb
+torch
+torchvision
+tqdm
+pandas
+sklearn
+ruamel.yaml
