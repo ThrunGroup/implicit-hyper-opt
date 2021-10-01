@@ -1,4 +1,3 @@
-"""TODO (JON): Add a description of what we are using this file for."""
 import os
 import sys
 import argparse
@@ -16,22 +15,9 @@ from multiprocessing import Pool
 from data_loaders import load_mnist, load_cifar10, load_cifar100, load_ham
 from models.simple_models import CNN, Net, GaussianDropout
 from utils.util import eval_hessian, eval_jacobian, gather_flat_grad, conjugate_gradiant
-from kfac import KFACOptimizer
 from utils.csv_logger import CSVLogger
 from ruamel.yaml import YAML
 from models.resnet_cifar import resnet44
-
-sys.path.insert(0, '/scratch/gobi1/datasets')
-
-
-# Unused imports
-# from logger import Logger
-# from plot_utils import plotResult, plot_all, showAllL2, showAllL2Change
-# from itertools import cycle
-# import matplotlib.pyplot as plt
-# import torch.nn as nn
-# from torchvision import datasets, transforms
-# from tqdm import tqdm
 
 
 def experiment(args):
@@ -40,7 +26,7 @@ def experiment(args):
     :param args:
     :return:
     """
-    print(f"Running experiment with args: {args}")
+    print(f"Running experiment with args:\n {args}")
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
     # Do this since
@@ -48,19 +34,18 @@ def experiment(args):
     args.val_batch_num -= 1
     args.eval_batch_num -= 1
 
-    # TODO (JON): What is yaml for right now?
     yaml = YAML()
     yaml.preserve_quotes = True
     yaml.boolean_representation = ['False', 'True']
 
     torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
     np.random.seed(args.seed)
     if args.cuda: torch.cuda.manual_seed(args.seed)
 
     ###############################################################################
     # Setup dataset
     ###############################################################################
-    # TODO (JON): Verify that the loaders are shuffling the validation / test sets.
     if args.dataset == 'MNIST':
         num_train = args.datasize
         if num_train == -1: num_train = 50000
@@ -218,14 +203,8 @@ def experiment(args):
     # TODO (JON):  Add argument for other optimizers?
     init_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)  # , momentum=0.9)
 
-    # torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-    # KFACOptimizer(model)  #, TInv=1, TCov=1)
-    # optim.Adam(model.parameters(), lr=0.01)  #, momentum=0.9)  # , momentum=0.9)
-    # KFACOptimizer(model, TInv=1, TCov=1)  # , momentum=0, damping=0.001)  #, lr=0.0001)
-    # optim.RMSprop(model.parameters())  # , lr=args.lr)  #, momentum=args.momentum)
-    # sec_optimizer = KFACOptimizer(model, TInv=1, TCov=1, momentum=0, damping=0.0001, lr=0.0001)
+
     hyper_optimizer = torch.optim.RMSprop([get_hyper_train()])  # , lr=args.lrh)  # try 0.1 as lr
-    # Adam([get_hyper_train()], lr=0.1) # , lr=0.01)  # , lr=args.lrh)  #, lr=0.1)  # , lr=1e-4) #, args.lrh)
 
     ###############################################################################
     # Setup Saving
@@ -259,7 +238,7 @@ def experiment(args):
         brightness_noise = torch.randn(x.shape[0]).cuda() * torch.exp(brightness)
         return x * saturation_noise.view(-1, 1, 1, 1) + brightness_noise.view(-1, 1, 1, 1)
 
-    def train_loss_func(x, y, network, reduction='elementwise_mean'):
+    def train_loss_func(x, y, network, reduction='mean'):
         """
 
         :param x:
@@ -293,7 +272,7 @@ def experiment(args):
             reg_loss = network.L2_loss()
         return F.cross_entropy(predicted_y, y, reduction=reduction) + reg_loss, predicted_y
 
-    def val_loss_func(x, y, network, reduction='elementwise_mean'):
+    def val_loss_func(x, y, network, reduction='mean'):
         """
 
         :param x:
@@ -313,7 +292,7 @@ def experiment(args):
             regularizer = 0  # 1e-5 * torch.sum(torch.abs(get_hyper_train()))
         return loss + regularizer, predicted_y
 
-    def test_loss_func(x, y, network, reduction='elementwise_mean'):
+    def test_loss_func(x, y, network, reduction='mean'):
         """
 
         :param x:
@@ -336,7 +315,7 @@ def experiment(args):
         x, y = Variable(x), Variable(y)
         return x, y
 
-    def batch_loss(x, y, network, loss_func, reduction='elementwise_mean'):
+    def batch_loss(x, y, network, loss_func, reduction='mean'):
         """
 
         :param x:
@@ -363,14 +342,10 @@ def experiment(args):
         for batch_idx, (x, y) in enumerate(train_loader):
             # Take a gradient step for this mini-batch
             optimizer.zero_grad()
-            if args.hessian == 'KFAC':
-                kfac_opt.zero_grad()
             x, y = prepare_data(x, y)
             loss, _ = batch_loss(x, y, model, train_loss_func)
             loss.backward()
             optimizer.step()
-            if args.hessian == 'KFAC':
-                kfac_opt.fake_step()
 
             total_loss += loss.item()
             step += 1
@@ -420,8 +395,6 @@ def experiment(args):
     ###############################################################################
 
     # TODO (JON):  We probably want CG_optimize and KFAC_optimize in a different file?
-    KFAC_damping = 1e-2
-    kfac_opt = KFACOptimizer(model, damping=KFAC_damping)  # sec_optimizer
 
     def KFAC_optimize(epoch_h):
         """
@@ -512,85 +485,6 @@ def experiment(args):
                 flat_d_train_loss_d_theta.backward(flat_pre_conditioner)
                 if get_hyper_train().grad is not None:
                     total_d_val_loss_d_lambda -= get_hyper_train().grad
-                if batch_idx >= args.train_batch_num: break
-            total_d_val_loss_d_lambda /= (batch_idx + 1)
-        elif args.hessian == 'KFAC':
-            # model.zero_grad()
-            '''model.train()
-            for kfac_epoch in range(1):
-                model.zero_grad()
-                for batch_idx, (x, y) in enumerate(train_loader):
-                    # if batch_idx > 50:  # TODO (JON): Just sample 50 random mini-batches?
-                    #     And break
-                    kfac_opt.zero_grad()
-                    x, y = prepare_data(x, y)
-                    train_loss, _ = batch_loss(x, y, model, train_loss_func)
-                    train_loss.backward()
-                    kfac_opt.fake_step()
-                    if batch_idx >= args.train_batch_num: break
-                    # TODO (JON):  Note that this not a normal K-FAC step - certain parts commented out.'''
-            flat_pre_conditioner = torch.zeros(num_weights).cuda()
-            for batch_idx, (x, y) in enumerate(train_loader):
-                model.train()
-                model.zero_grad(), hyper_optimizer.zero_grad()
-                x, y = prepare_data(x, y)
-                train_loss, _ = batch_loss(x, y, model, train_loss_func)
-                # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-                d_train_loss_d_theta = grad(train_loss, model.parameters(), create_graph=True)
-                flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)
-
-                current = 0
-                for m in model.modules():
-                    if m.__class__.__name__ in ['Linear', 'Conv2d']:
-                        # kfac_opt.zero_grad()
-
-                        # print(f'KFAC module: {m}')
-                        if m.__class__.__name__ == 'Conv2d':
-                            size0, size1 = m.weight.size(0), m.weight.view(m.weight.size(0), -1).size(1)
-                        else:
-                            size0, size1 = m.weight.size(0), m.weight.size(1)
-                        mod_size1 = size1 + 1 if m.bias is not None else size1
-                        shape = (size0, (mod_size1))
-                        size = size0 * mod_size1
-
-                        '''# placeholder for d loss / d theta in validation dataset
-                        model.train()
-                        model.zero_grad()
-                        num_weights = sum(p.numel() for p in m.parameters())
-                        d_val_loss_d_theta = torch.zeros(num_weights).cuda()
-                        for val_batch_idx, (x_val, y_val) in enumerate(val_loader):
-                            model.zero_grad()
-                            x_val, y_val = prepare_data(x_val, y_val)
-                            val_loss, _ = batch_loss(x_val, y_val, model, val_loss_func)
-                            val_loss_grad = grad(val_loss, m.parameters())
-                            d_val_loss_d_theta += gather_flat_grad(val_loss_grad)
-                            if val_batch_idx >= args.val_batch_num: break
-                        d_val_loss_d_theta /= (val_batch_idx + 1)'''
-
-                        pre_conditioner = kfac_opt._get_natural_grad(m,
-                                                                     d_val_loss_d_theta[current:current + size].view(
-                                                                         shape),
-                                                                     KFAC_damping)
-
-                        flat_pre_conditioner[current: current + size] = gather_flat_grad(pre_conditioner)
-
-                        '''model.train()
-                        model.zero_grad(), hyper_optimizer.zero_grad()
-                        x, y = prepare_data(x, y)
-                        train_loss, _ = batch_loss(x, y, model, train_loss_func)
-                        # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-                        d_train_loss_d_theta = grad(train_loss, m.parameters(), create_graph=True)
-                        flat_d_train_loss_d_theta = gather_flat_grad(d_train_loss_d_theta)'''
-
-                        '''model.zero_grad(), hyper_optimizer.zero_grad()
-                        flat_d_train_loss_d_theta[current: current + size].backward(flat_pre_conditioner, create_graph=True)
-
-                        total_d_val_loss_d_lambda -= get_hyper_train().grad'''
-                        current += size
-                model.zero_grad(), hyper_optimizer.zero_grad()
-                flat_d_train_loss_d_theta.backward(flat_pre_conditioner)
-                total_d_val_loss_d_lambda -= get_hyper_train().grad
-
                 if batch_idx >= args.train_batch_num: break
             total_d_val_loss_d_lambda /= (batch_idx + 1)
 
@@ -966,16 +860,13 @@ if __name__ == '__main__':
         args_direct = setup_overfit_validation('MNIST', 'mlp', 0)  # setup_direct_inversion()
         args_direct.hessian = 'direct'
 
-        args_KFAC = setup_overfit_validation('MNIST', 'mlp', 0)
-        args_KFAC.hessian = 'KFAC'
-
         args_identity = setup_overfit_validation('MNIST', 'mlp', 0)
         args_identity.hessian = 'identity'
 
         args_zero = setup_overfit_validation('MNIST', 'mlp', 0)
         args_zero.hessian = 'zero'
 
-        returns = [args_direct, args_KFAC, args_identity, args_zero]
+        returns = [args_direct, args_identity, args_zero]
         for val in returns:
             val.hyper_log_interval = 1
             val.testsize = 100
@@ -991,8 +882,6 @@ if __name__ == '__main__':
         # Launch a process for each args
         model = 'resnet'
         dataset = 'CIFAR10'
-        args_KFAC = setup_overfit_validation(dataset, model, 0)
-        args_KFAC.hessian = 'KFAC'
 
         args_identity = setup_overfit_validation(dataset, model, 0)
         args_identity.hessian = 'identity'
@@ -1000,7 +889,7 @@ if __name__ == '__main__':
         args_zero = setup_overfit_validation(dataset, model, 0)
         args_zero.hessian = 'zero'
 
-        returns = [args_KFAC, args_identity, args_zero]
+        returns = [args_identity, args_zero]
         for val in returns:
             val.hyper_log_interval = 1
             val.batch_size = 128
@@ -1079,26 +968,6 @@ if __name__ == '__main__':
     execute_argss_inversion = setup_inversion_comparison_direct()
     execute_argss_learn_images = setup_learn_images_all_datasets()
 
-    # super_execute_argss = execute_argss_hessian + execute_argss_inversion + execute_argss_learn_images
-    # super_execute_argss = execute_argss_inversion  #[execute_argss_learn_images[1]]  # execute_argss_inversion
-    '''temp_args = setup_overfit_validation('CIFAR10', 'mlp', 1)
-    temp_args.datasize = 10
-    temp_args.batch_size = temp_args.datasize
-    temp_args.valsize = -1
-    temp_args.testsize = 200
-    temp_args.hyper_train = 'opt_data'
-    temp_args.hessian = 'KFAC'
-    temp_args.hyper_log_interval = 5
-    temp_args.eval_batch_num = 100
-    temp_args.hepochs = 1000'''
-    # temp_args = setup_learn_images('CIFAR10', 10)
-    # temp_args.model = 'mlp'
-    # temp_args.hessian = 'identity'
-    # temp_args.l2 = -10
-    # super_execute_argss = [temp_args]
-
-    #super_execute_argss = [setup_overfit_validation('CIFAR10', 'resnet',
-    #                                                0)]  # execute_argss_learn_images  #setup_overfit_images()  #setup_inversion_comparison_large()
     super_execute_argss = setup_overfit_images()
     # TODO (JON): I put different elementary optimizer and inverter
     do_multiprocess = False
@@ -1110,10 +979,4 @@ if __name__ == '__main__':
         for execute_args in super_execute_argss:
             print(execute_args)
             experiment(execute_args)
-
-    # print(args)
-    # experiment(args)
-
-    # TODO: Separate out the part of the code that specifies arguments for experiments!
-    # TODO: Also, we should have plot_utils load paths from the arguments we provide?
     print("Finished with experiments!")
