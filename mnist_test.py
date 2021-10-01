@@ -38,7 +38,7 @@ def setup_overfit_validation(dataset, model, num_layers):
     cur_args.hyper_train = 'all_weight'
     cur_args.l2 = -4
 
-    cur_args.hessian = 'KFAC'
+    cur_args.hessian = 'identity'
     cur_args.hepochs = 1000
     cur_args.epochs = 5
     cur_args.init_epochs = 5
@@ -64,7 +64,7 @@ def setup_overfit_images():
                 args.testsize = 50
                 args.break_perfect_val = True
                 args.hepochs = 500 # TODO: I shrunk this
-                args.hessian = 'KFAC'
+                args.hessian = 'identity'
                 if dataset == 'CIFAR10':
                     args.lrh = 1e-2
                 elif dataset == 'MNIST':
@@ -133,7 +133,7 @@ def get_hyper_train(args, model):
         return model.various
 
 
-def train_loss_func(args, model, x, y, network, reduction='mean'):
+def train_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
     reg_loss = 0
     if args.hyper_train == 'weight':
         predicted_y = network(x)
@@ -151,7 +151,7 @@ def train_loss_func(args, model, x, y, network, reduction='mean'):
     return F.cross_entropy(predicted_y, y, reduction=reduction) + reg_loss, predicted_y
 
 
-def val_loss_func(args, model, x, y, network, reduction='mean'):
+def val_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
     predicted_y = network(x)
     loss = F.cross_entropy(predicted_y, y, reduction=reduction)
     if args.hyper_train == 'opt_data':
@@ -161,7 +161,7 @@ def val_loss_func(args, model, x, y, network, reduction='mean'):
     return loss + regularizer, predicted_y
 
 
-def test_loss_func(args, model, x, y, network, reduction='mean'):
+def test_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
     return val_loss_func(args, model, x, y, network, reduction=reduction)  # , predicted_y
 
 
@@ -172,7 +172,7 @@ def prepare_data(args, x, y):
     return x, y
 
 
-def batch_loss(args, model, x, y, network, loss_func, reduction='mean'):
+def batch_loss(args, model, x, y, network, loss_func, reduction='elementwise_mean'):
     loss, predicted_y = loss_func(args, model, x, y, network, reduction=reduction)
     return loss, predicted_y
 
@@ -530,7 +530,7 @@ def get_args():
     parser.add_argument('--break-perfect-val', action='store_true', default=False,
                         help='disables CUDA training')
     parser.add_argument('--seed', type=int, default=100, metavar='S',
-                        help='random seed (default: 1)')
+                        help='random seed (default: 100)')
 
     return parser.parse_args()
 
@@ -542,6 +542,7 @@ if __name__ == '__main__':
     # TODO (JON): I put different elementary optimizer and inverter
     for execute_args in super_execute_argss:
         #import ipdb; ipdb.set_trace()
+        print(execute_args)
         experiment(execute_args)
 
     # TODO: Separate out the part of the code that specifies arguments for experiments!
