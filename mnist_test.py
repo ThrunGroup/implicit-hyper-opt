@@ -278,7 +278,31 @@ def KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_o
     dLv_dw /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
 
     # Calculate preconditioner  v1*(inverse Hessian approximation) [orange term in Figure 2]
-    if args.hessian == 'KFAC':
+
+    # TODO: Marked above
+    # get d theta / d lambda
+    if args.hessian == 'identity' or args.hessian == 'direct':
+        if args.hessian == 'identity':
+            pre_conditioner = dLv_dw
+            flat_pre_conditioner = pre_conditioner  # 2*pre_conditioner - args.lr*hessian_term
+
+        model.train()  # train()
+        for batch_idx, (x, y) in enumerate(train_loader):
+            x, y = prepare_data(args, x, y)
+            train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
+            # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
+
+            model.zero_grad(), hyper_optimizer.zero_grad()
+            d_Lt_dw = grad(train_loss, model.parameters(), create_graph=True)
+            flat_d_Lt_dw = gather_flat_grad(d_Lt_dw)
+
+            model.zero_grad(), hyper_optimizer.zero_grad()
+            flat_d_Lt_dw.backward(flat_pre_conditioner)
+            if get_hyper_train(args, model).grad is not None:
+                total_dLv_dlambda -= get_hyper_train(args, model).grad
+            if batch_idx >= args.train_batch_num: break
+        total_dLv_dlambda /= (batch_idx + 1)
+    elif args.hessian == 'KFAC':
         print(f"Passed {args.hessian}, not a valid choice. Need to choose KFAC")
         # model.zero_grad()
         flat_pre_conditioner = torch.zeros(num_weights).cuda()
