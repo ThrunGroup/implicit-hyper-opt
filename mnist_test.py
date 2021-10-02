@@ -11,7 +11,6 @@ import copy
 from data_loaders import load_mnist, load_cifar10, load_cifar100, load_ham
 from models.simple_models import CNN, Net, GaussianDropout
 from utils.util import eval_hessian, eval_jacobian, gather_flat_grad, conjugate_gradiant
-from kfac import KFACOptimizer
 
 
 def setup_overfit_validation(dataset, model, num_layers):
@@ -206,7 +205,7 @@ def save_learned(datas, is_mnist, batch_size, args):
     fig.savefig('images/learned_images_' + args.dataset + '_' + str(args.batch_size) + '_' + args.model + '.pdf')
     plt.close(fig)
 
-def train(args, model, train_loader, optimizer, train_loss_func, kfac_opt, elementary_epoch, step):
+def train(args, model, train_loader, optimizer, train_loss_func, elementary_epoch, step):
     model.train()  # _train()
     total_loss = 0.0
     # TODO (JON): Sample a mini-batch
@@ -214,14 +213,10 @@ def train(args, model, train_loader, optimizer, train_loss_func, kfac_opt, eleme
     for batch_idx, (x, y) in enumerate(train_loader):
         # Take a gradient step for this mini-batch
         optimizer.zero_grad()
-        if args.hessian == 'KFAC':
-            kfac_opt.zero_grad()
         x, y = prepare_data(args, x, y)
         loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
         loss.backward()
         optimizer.step()
-        if args.hessian == 'KFAC':
-            kfac_opt.fake_step() # TODO (@Mo): What is this?
 
         total_loss += loss.item()
         step += 1
@@ -258,7 +253,7 @@ def evaluate(args, model, step, data_loader, name=None):
     return acc, total_loss
 
 
-def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_opt, KFAC_damping, epoch_h):
+def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
     # set up placeholder for the partial derivative in each batch
     total_dLv_dlambda = torch.zeros(get_hyper_train(args, model).size(0))
     if args.cuda:
@@ -421,10 +416,6 @@ def experiment(args):
     init_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)  # , momentum=0.9)
     hyper_optimizer = torch.optim.RMSprop([get_hyper_train(args, model)])  # , lr=args.lrh)  # try 0.1 as lr
 
-    # Setup Inversion Algorithms
-    KFAC_damping = 1e-2
-    kfac_opt = KFACOptimizer(model, damping=KFAC_damping)  # sec_optimizer
-
     # Perform the training
     global_step = 0
     _1, _2 = 0, 0
@@ -452,7 +443,7 @@ def experiment(args):
         # else:
         #    optimizer = sec_optimizer
         for epoch in range(1, elementary_epochs + 1):
-            global_step, epoch_train_loss = train(args, model, train_loader, optimizer, train_loss_func, kfac_opt, epoch, global_step)
+            global_step, epoch_train_loss = train(args, model, train_loader, optimizer, train_loss_func, epoch, global_step)
             if np.isnan(epoch_train_loss):
                 print("Loss is nan, stop the loop")
                 break
@@ -463,7 +454,7 @@ def experiment(args):
         # if epoch_h == 0:
         #     continue
 
-        _1, _2 = hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_opt, KFAC_damping, epoch_h)
+        _1, _2 = hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer)
 
 
 
@@ -536,7 +527,7 @@ def get_args():
                         help='whether to reset parameter')
     parser.add_argument('--jacobian', type=str, default="direct", choices=['direct', 'product'],
                         help='which method to compute jacobian')
-    parser.add_argument('--hessian', type=str, default="identity", choices=['direct', 'KFAC', 'identity'],
+    parser.add_argument('--hessian', type=str, default="identity", choices=['direct', 'identity'],
                         help='which method to compute hessian')
     parser.add_argument('--hyper_train', type=str, default="opt_data",
                         choices=['weight', 'all_weight', 'dropout', 'opt_data', 'various'],
