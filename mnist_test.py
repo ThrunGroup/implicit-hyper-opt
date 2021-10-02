@@ -258,7 +258,7 @@ def evaluate(args, model, step, data_loader, name=None):
     return acc, total_loss
 
 
-def KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_opt, KFAC_damping, epoch_h):
+def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_opt, KFAC_damping, epoch_h):
     # set up placeholder for the partial derivative in each batch
     total_dLv_dlambda = torch.zeros(get_hyper_train(args, model).size(0))
     if args.cuda:
@@ -306,41 +306,6 @@ def KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_o
             if batch_idx >= args.train_batch_num:
                 break
         total_dLv_dlambda /= (batch_idx + 1)
-    elif args.hessian == 'KFAC':
-        print(f"Passed {args.hessian}, not a valid choice. Need to choose KFAC")
-        # model.zero_grad()
-        flat_pre_conditioner = torch.zeros(num_weights).cuda()
-        for batch_idx, (x, y) in enumerate(train_loader):
-            model.train()
-            model.zero_grad()
-            hyper_optimizer.zero_grad()
-            x, y = prepare_data(args, x, y)
-            train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
-            # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-            dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
-            flat_dLt_dw = gather_flat_grad(dLt_dw)
-
-            current = 0
-            for m in model.modules():
-                if m.__class__.__name__ in ['Linear', 'Conv2d']:
-                    # kfac_opt.zero_grad()
-                    if m.__class__.__name__ == 'Conv2d':
-                        size0, size1 = m.weight.size(0), m.weight.view(m.weight.size(0), -1).size(1)
-                    else:
-                        size0, size1 = m.weight.size(0), m.weight.size(1)
-                    mod_size1 = size1 + 1 if m.bias is not None else size1 # TODO (@Mo): Lol
-                    shape = (size0, (mod_size1))
-                    size = size0 * mod_size1
-                    pre_conditioner = kfac_opt._get_natural_grad(m, dLv_dw[current:current + size].view(shape), KFAC_damping) # TODO (Mo): What is this?
-                    flat_pre_conditioner[current: current + size] = gather_flat_grad(pre_conditioner)
-                    current += size
-            model.zero_grad()
-            hyper_optimizer.zero_grad()
-            flat_dLt_dw.backward(flat_pre_conditioner)
-            total_dLv_dlambda -= get_hyper_train(args, model).grad
-            if batch_idx >= args.train_batch_num:
-                break
-        total_dLv_dlambda /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
     elif args.hessian == 'neumann':
         flat_dLt_dw = torch.zeros(num_weights).cuda()
         model.train()
@@ -498,7 +463,7 @@ def experiment(args):
         # if epoch_h == 0:
         #     continue
 
-        _1, _2 = KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_opt, KFAC_damping, epoch_h)
+        _1, _2 = hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_opt, KFAC_damping, epoch_h)
 
 
 
