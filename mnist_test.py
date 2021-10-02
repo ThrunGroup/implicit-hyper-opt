@@ -64,7 +64,7 @@ def setup_overfit_images():
                 args.testsize = 50
                 args.break_perfect_val = True
                 args.hepochs = 500 # TODO: I shrunk this
-                args.hessian = 'neumann'
+                args.hessian = 'identity'
                 args.num_neumann = 1
                 if dataset == 'CIFAR10':
                     args.lrh = 1e-2
@@ -264,7 +264,7 @@ def KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_o
     if args.cuda:
         total_dLv_dlambda = total_dLv_dlambda.cuda()
 
-    # Calculate v1 = dL_v / dw
+    # Calculate v1 = dLv / dw
     num_weights = sum(p.numel() for p in model.parameters())
     dLv_dw = torch.zeros(num_weights).cuda()
     model.train()
@@ -280,27 +280,31 @@ def KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_o
 
     # Calculate preconditioner  v1*(inverse Hessian approximation) [orange term in Figure 2]
 
-    # get d theta / d lambda
+    # get dw / dlambda
     if args.hessian == 'identity' or args.hessian == 'direct': # TODO (@Mo): Warning!!! This may not work for 'direct' hessian. See https://github.com/ThrunGroup/implicit-hyper-opt/blob/weight_decay_overfit/mnist_test.py#L450-L499; the code may not be equivalent
         if args.hessian == 'identity':
-            pre_conditioner = dLv_dw
+            pre_conditioner = dLv_dw # num_neumann = 0
             flat_pre_conditioner = pre_conditioner  # 2*pre_conditioner - args.lr*hessian_term
-
         model.train()  # train()
         for batch_idx, (x, y) in enumerate(train_loader):
             x, y = prepare_data(args, x, y)
             train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
             # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
 
-            model.zero_grad(), hyper_optimizer.zero_grad()
+            model.zero_grad()
+            hyper_optimizer.zero_grad()
             dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
             flat_dLt_dw = gather_flat_grad(dLt_dw)
 
-            model.zero_grad(), hyper_optimizer.zero_grad()
+            model.zero_grad()
+            hyper_optimizer.zero_grad()
+            # This updates the hyperparameter's .grad  in the weight_decay overfit experiment
+            # because the weight_decay is explicitly added to the train_loss_func for the Net via e^\lambda * w * w
             flat_dLt_dw.backward(flat_pre_conditioner)
             if get_hyper_train(args, model).grad is not None:
-                total_dLv_dlambda -= get_hyper_train(args, model).grad
-            if batch_idx >= args.train_batch_num: break
+                total_dLv_dlambda -= get_hyper_train(args, model).grad # this is the "-v_3" part of the paper
+            if batch_idx >= args.train_batch_num:
+                break
         total_dLv_dlambda /= (batch_idx + 1)
     elif args.hessian == 'KFAC':
         print(f"Passed {args.hessian}, not a valid choice. Need to choose KFAC")
@@ -377,8 +381,6 @@ def KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_o
             if batch_idx >= args.train_batch_num:
                 break
         total_dLv_dlambda /= (batch_idx + 1)
-
-
 
     # Compute direct gradient of dLv_dlambda. This is usually 0.
     # TODO (@Mo): But will we need this in data augmentation setting?
