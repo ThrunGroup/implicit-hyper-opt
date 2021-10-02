@@ -279,9 +279,8 @@ def KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_o
 
     # Calculate preconditioner  v1*(inverse Hessian approximation) [orange term in Figure 2]
 
-    # TODO: Marked above
     # get d theta / d lambda
-    if args.hessian == 'identity' or args.hessian == 'direct':
+    if args.hessian == 'identity' or args.hessian == 'direct': # TODO (@Mo): Warning!!! This may not work for 'direct' hessian. See https://github.com/ThrunGroup/implicit-hyper-opt/blob/weight_decay_overfit/mnist_test.py#L450-L499; the code may not be equivalent
         if args.hessian == 'identity':
             pre_conditioner = dLv_dw
             flat_pre_conditioner = pre_conditioner  # 2*pre_conditioner - args.lr*hessian_term
