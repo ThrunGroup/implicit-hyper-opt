@@ -64,7 +64,8 @@ def setup_overfit_images():
                 args.testsize = 50
                 args.break_perfect_val = True
                 args.hepochs = 500 # TODO: I shrunk this
-                args.hessian = 'identity'
+                args.hessian = 'neumann'
+                args.num_neumann = 1
                 if dataset == 'CIFAR10':
                     args.lrh = 1e-2
                 elif dataset == 'MNIST':
@@ -292,11 +293,11 @@ def KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_o
             # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
 
             model.zero_grad(), hyper_optimizer.zero_grad()
-            d_Lt_dw = grad(train_loss, model.parameters(), create_graph=True)
-            flat_d_Lt_dw = gather_flat_grad(d_Lt_dw)
+            dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
+            flat_dLt_dw = gather_flat_grad(dLt_dw)
 
             model.zero_grad(), hyper_optimizer.zero_grad()
-            flat_d_Lt_dw.backward(flat_pre_conditioner)
+            flat_dLt_dw.backward(flat_pre_conditioner)
             if get_hyper_train(args, model).grad is not None:
                 total_dLv_dlambda -= get_hyper_train(args, model).grad
             if batch_idx >= args.train_batch_num: break
@@ -336,6 +337,47 @@ def KFAC_optimize(args, model, train_loader, val_loader, hyper_optimizer, kfac_o
             if batch_idx >= args.train_batch_num:
                 break
         total_dLv_dlambda /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
+    elif args.hessian == 'neumann':
+        flat_dLt_dw = torch.zeros(num_weights).cuda()
+        model.train()
+        for batch_idx, (x, y) in enumerate(train_loader):
+            x, y = prepare_data(args, x, y)
+            train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
+            # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
+            model.zero_grad()
+            hyper_optimizer.zero_grad()
+            dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
+            flat_dLt_dw += gather_flat_grad(dLt_dw)
+        flat_dLt_dw /= (batch_idx + 1)
+
+        pre_conditioner = dLv_dw.detach()  # dLv_dw is already a flat tensor
+        counter = pre_conditioner
+        i = 0
+        while i < args.num_neumann:
+            old_counter = counter
+            hessian_term = gather_flat_grad(grad(flat_dLt_dw, model.parameters(), grad_outputs=counter.view(-1), retain_graph=True))
+            counter = old_counter - args.lr * hessian_term
+            pre_conditioner += counter
+            i += 1
+
+        model.train()  # train()
+        for batch_idx, (x, y) in enumerate(train_loader):
+            x, y = prepare_data(args, x, y)
+            train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
+            # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
+
+            model.zero_grad(), hyper_optimizer.zero_grad()
+            dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
+            flat_dLt_dw = gather_flat_grad(dLt_dw)
+
+            model.zero_grad(), hyper_optimizer.zero_grad()
+            flat_dLt_dw.backward(pre_conditioner)
+            if get_hyper_train(args, model).grad is not None:
+                total_dLv_dlambda -= get_hyper_train(args, model).grad
+            if batch_idx >= args.train_batch_num:
+                break
+        total_dLv_dlambda /= (batch_idx + 1)
+
 
 
     # Compute direct gradient of dLv_dlambda. This is usually 0.
