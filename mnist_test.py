@@ -62,7 +62,7 @@ def setup_overfit_images():
                 args.testsize = 50
                 args.break_perfect_val = True
                 args.hepochs = 500 # TODO: I shrunk this
-                args.hessian = 'identity'
+                args.hessian = 'neumann'
                 args.num_neumann = 1
                 if dataset == 'CIFAR10':
                     args.lrh = 1e-2
@@ -251,6 +251,32 @@ def evaluate(args, model, step, data_loader, name=None):
     print(f'Evaluate {name}, {step}: Average loss: {total_loss:.4f}, Accuracy: {correct}/{data_size} ({acc}%)')
     return acc, total_loss
 
+def neumann_hyperstep_preconditioner(args, dLv_dw, flat_dLt_dw, model):
+    '''
+    Algorithm 3 of the paper
+    '''
+
+    # v = dLv_dw.detach()  # dLv_dw is already a flat tensor
+    # p = v
+    # i = 0
+    # while i < args.num_neumann:
+    #     hessian_term = gather_flat_grad(grad(flat_dLt_dw, model.parameters(), grad_outputs=p.view(-1), retain_graph=True))
+    #     p = p - args.lr * hessian_term
+    #     v += p
+    #     i += 1
+    # pre_conditioner = v
+
+    v = dLv_dw.detach()  # detach from graph -> doesn't require gradients!
+    p = v
+    # Do the fixed point iteration to approximate the vector-inverseHessian product
+    for j in range(args.num_neumann):
+        # Calculate the jth neumann sum term, v_{j+1} = (I - d^2_Lt/d^2_w) * v_j
+        hessian_term = gather_flat_grad(
+            grad(flat_dLt_dw, model.parameters(), grad_outputs=p.view(-1), retain_graph=True)
+        )
+        v -= args.lr * hessian_term # v_j = (1 - \alpha * H)(v_{j-1})
+        p += v
+    return p
 
 def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
     # set up placeholder for the partial derivative in each batch
@@ -279,6 +305,7 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
         if args.hessian == 'identity':
             pre_conditioner = dLv_dw # num_neumann = 0
             flat_pre_conditioner = pre_conditioner  # 2*pre_conditioner - args.lr*hessian_term
+
         model.train()  # train()
         for batch_idx, (x, y) in enumerate(train_loader):
             x, y = prepare_data(args, x, y)
@@ -300,6 +327,7 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
             if batch_idx >= args.train_batch_num:
                 break
         total_dLv_dlambda /= (batch_idx + 1)
+
     elif args.hessian == 'neumann':
         flat_dLt_dw = torch.zeros(num_weights).cuda()
         model.train()
@@ -313,15 +341,7 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
             flat_dLt_dw += gather_flat_grad(dLt_dw)
         flat_dLt_dw /= (batch_idx + 1)
 
-        pre_conditioner = dLv_dw.detach()  # dLv_dw is already a flat tensor
-        counter = pre_conditioner
-        i = 0
-        while i < args.num_neumann:
-            old_counter = counter
-            hessian_term = gather_flat_grad(grad(flat_dLt_dw, model.parameters(), grad_outputs=counter.view(-1), retain_graph=True))
-            counter = old_counter - args.lr * hessian_term
-            pre_conditioner += counter
-            i += 1
+        pre_conditioner = neumann_hyperstep_preconditioner(args, dLv_dw, flat_dLt_dw, model)
 
         model.train()  # train()
         for batch_idx, (x, y) in enumerate(train_loader):
