@@ -290,34 +290,7 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
     # Calculate preconditioner  v1*(inverse Hessian approximation) [orange term in Figure 2]
 
     # get dw / dlambda
-    if args.hessian == 'identity' or args.hessian == 'direct': # TODO (@Mo): Warning!!! This may not work for 'direct' hessian. See https://github.com/ThrunGroup/implicit-hyper-opt/blob/weight_decay_overfit/mnist_test.py#L450-L499; the code may not be equivalent
-        if args.hessian == 'identity':
-            pre_conditioner = dLv_dw # num_neumann = 0
-            flat_pre_conditioner = pre_conditioner  # 2*pre_conditioner - args.lr*hessian_term
-
-        model.train()  # train()
-        for batch_idx, (x, y) in enumerate(train_loader):
-            x, y = prepare_data(args, x, y)
-            train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
-            # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-
-            model.zero_grad()
-            hyper_optimizer.zero_grad()
-            dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
-            flat_dLt_dw = gather_flat_grad(dLt_dw)
-
-            model.zero_grad()
-            hyper_optimizer.zero_grad()
-            # This updates the hyperparameter's .grad  in the weight_decay overfit experiment
-            # because the weight_decay is explicitly added to the train_loss_func for the Net via e^\lambda * w * w
-            flat_dLt_dw.backward(flat_pre_conditioner)
-            if get_hyper_train(args, model).grad is not None:
-                indirect_dLv_dlambda -= get_hyper_train(args, model).grad # this is the "-v_3" part of the paper
-            if batch_idx >= args.train_batch_num:
-                break
-        indirect_dLv_dlambda /= (batch_idx + 1)
-
-    elif args.hessian == 'neumann':
+    if args.hessian == 'neumann':
         flat_dLt_dw = torch.zeros(num_weights).cuda()
         model.train()
         for batch_idx, (x, y) in enumerate(train_loader):
@@ -329,26 +302,31 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
             dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
             flat_dLt_dw += gather_flat_grad(dLt_dw)
         flat_dLt_dw /= (batch_idx + 1)
-
         pre_conditioner = neumann_hyperstep_preconditioner(args, dLv_dw, flat_dLt_dw, model)
+    elif args.hessian == 'identity':
+        pre_conditioner = dLv_dw # num_neumann = 0
+    else:
+        raise Exception("Bad hessian specification! direct has been deprecated by Mo")
 
-        model.train()  # train()
-        for batch_idx, (x, y) in enumerate(train_loader):
-            x, y = prepare_data(args, x, y)
-            train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
-            # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
+    model.train()  # train()
+    for batch_idx, (x, y) in enumerate(train_loader):
+        x, y = prepare_data(args, x, y)
+        train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
+        # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
 
-            model.zero_grad(), hyper_optimizer.zero_grad()
-            dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
-            flat_dLt_dw = gather_flat_grad(dLt_dw)
+        model.zero_grad()
+        hyper_optimizer.zero_grad()
+        dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
+        flat_dLt_dw = gather_flat_grad(dLt_dw)
+        model.zero_grad()
+        hyper_optimizer.zero_grad()
+        flat_dLt_dw.backward(pre_conditioner)
+        if get_hyper_train(args, model).grad is not None:
+            indirect_dLv_dlambda -= get_hyper_train(args, model).grad
+        if batch_idx >= args.train_batch_num:
+            break
+    indirect_dLv_dlambda /= (batch_idx + 1)
 
-            model.zero_grad(), hyper_optimizer.zero_grad()
-            flat_dLt_dw.backward(pre_conditioner)
-            if get_hyper_train(args, model).grad is not None:
-                indirect_dLv_dlambda -= get_hyper_train(args, model).grad
-            if batch_idx >= args.train_batch_num:
-                break
-        indirect_dLv_dlambda /= (batch_idx + 1)
 
     # Compute direct gradient of dLv_dlambda. This is usually 0.
     # TODO (@Mo): But will we need this in data augmentation setting?
@@ -365,9 +343,9 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
         Lv_grad = grad(Lv, get_hyper_train(args, model), allow_unused=True)
         if Lv_grad is not None and Lv_grad[0] is not None:
             direct_dLv_dlambda += gather_flat_grad(Lv_grad)
-        else:
+        if batch_idx >= args.val_batch_num:
             break
-        if batch_idx >= args.val_batch_num: break
+
     direct_dLv_dlambda /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
     print("Direct", direct_dLv_dlambda.abs().sum()) # Always prints 0 for MNIST
 
