@@ -255,17 +255,6 @@ def neumann_hyperstep_preconditioner(args, dLv_dw, flat_dLt_dw, model):
     '''
     Algorithm 3 of the paper
     '''
-
-    # v = dLv_dw.detach()  # dLv_dw is already a flat tensor
-    # p = v
-    # i = 0
-    # while i < args.num_neumann:
-    #     hessian_term = gather_flat_grad(grad(flat_dLt_dw, model.parameters(), grad_outputs=p.view(-1), retain_graph=True))
-    #     p = p - args.lr * hessian_term
-    #     v += p
-    #     i += 1
-    # pre_conditioner = v
-
     v = dLv_dw.detach()  # detach from graph -> doesn't require gradients!
     p = v
     # Do the fixed point iteration to approximate the vector-inverseHessian product
@@ -280,9 +269,9 @@ def neumann_hyperstep_preconditioner(args, dLv_dw, flat_dLt_dw, model):
 
 def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
     # set up placeholder for the partial derivative in each batch
-    total_dLv_dlambda = torch.zeros(get_hyper_train(args, model).size(0))
+    indirect_dLv_dlambda = torch.zeros(get_hyper_train(args, model).size(0))
     if args.cuda:
-        total_dLv_dlambda = total_dLv_dlambda.cuda()
+        indirect_dLv_dlambda = indirect_dLv_dlambda.cuda()
 
     # Calculate v1 = dLv / dw
     num_weights = sum(p.numel() for p in model.parameters())
@@ -323,10 +312,10 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
             # because the weight_decay is explicitly added to the train_loss_func for the Net via e^\lambda * w * w
             flat_dLt_dw.backward(flat_pre_conditioner)
             if get_hyper_train(args, model).grad is not None:
-                total_dLv_dlambda -= get_hyper_train(args, model).grad # this is the "-v_3" part of the paper
+                indirect_dLv_dlambda -= get_hyper_train(args, model).grad # this is the "-v_3" part of the paper
             if batch_idx >= args.train_batch_num:
                 break
-        total_dLv_dlambda /= (batch_idx + 1)
+        indirect_dLv_dlambda /= (batch_idx + 1)
 
     elif args.hessian == 'neumann':
         flat_dLt_dw = torch.zeros(num_weights).cuda()
@@ -356,10 +345,10 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
             model.zero_grad(), hyper_optimizer.zero_grad()
             flat_dLt_dw.backward(pre_conditioner)
             if get_hyper_train(args, model).grad is not None:
-                total_dLv_dlambda -= get_hyper_train(args, model).grad
+                indirect_dLv_dlambda -= get_hyper_train(args, model).grad
             if batch_idx >= args.train_batch_num:
                 break
-        total_dLv_dlambda /= (batch_idx + 1)
+        indirect_dLv_dlambda /= (batch_idx + 1)
 
     # Compute direct gradient of dLv_dlambda. This is usually 0.
     # TODO (@Mo): But will we need this in data augmentation setting?
@@ -382,7 +371,7 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
     direct_dLv_dlambda /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
     print("Direct", direct_dLv_dlambda.abs().sum()) # Always prints 0 for MNIST
 
-    get_hyper_train(args, model).grad = direct_dLv_dlambda + total_dLv_dlambda
+    get_hyper_train(args, model).grad = direct_dLv_dlambda + indirect_dLv_dlambda
     print("weight={}, update={}".format(get_hyper_train(args, model).norm(), get_hyper_train(args, model).grad.norm()))
 
     hyper_optimizer.step() # TODO (@Mo): Understand hyper_optimizer.step(), get_hyper_train(), kfac_opt.fake_step()?
@@ -511,7 +500,7 @@ def get_args():
                         help='num of validation batches')
     parser.add_argument('--eval_batch_num', type=int, default=100, metavar='HN',
                         help='num of validation batches')
-    # TODO (JON): We probably want sub-epoch updates on our weights and hyperparameters.total_dLv_dlambda
+    # TODO (JON): We probably want sub-epoch updates on our weights and hyperparameters.indirect_dLv_dlambda
     # TODO (JON): Add how many elementary batches before a hyper batch
     # TODO (JON): Add how many hyper batches to do before going back to elementary
 
