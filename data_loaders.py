@@ -59,7 +59,7 @@ def load_mnist(batch_size, val_split=True, subset=[-1, -1, -1], num_train=50000,
 
         # Test set
         testset = datasets.MNIST(root='./data/mnist', train=False, download=True, transform=transform)
-        testset.test_data = testset.test_data
+        testset.data = testset.data
 
         if only_split_train:
             rand_ind = np.random.randint(0, high=len(original_trainset) - 1, size=subset[0] + subset[1])
