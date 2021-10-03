@@ -3,8 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
-from torch.autograd import grad
-from torch.autograd import Variable
+from torch.autograd import grad, Variable
 import copy
 
 # Local imports
@@ -266,9 +265,9 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
     for batch_idx, (x, y) in enumerate(val_loader):
         model.zero_grad()
         x, y = prepare_data(args, x, y)
-        val_loss, _ = batch_loss(args, model, x, y, model, val_loss_func)
-        val_loss_grad = grad(val_loss, model.parameters())
-        dLv_dw += gather_flat_grad(val_loss_grad)
+        Lv, _ = batch_loss(args, model, x, y, model, val_loss_func)
+        Lv_grad = grad(Lv, model.parameters())
+        dLv_dw += gather_flat_grad(Lv_grad)
         if batch_idx >= args.val_batch_num:
             break
     dLv_dw /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
@@ -353,10 +352,10 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
         model.zero_grad()
         hyper_optimizer.zero_grad()
         x_val, y_val = prepare_data(args, x_val, y_val)
-        val_loss, _ = batch_loss(args, model, x_val, y_val, model, val_loss_func)
-        val_loss_grad = grad(val_loss, get_hyper_train(args, model), allow_unused=True)
-        if val_loss_grad is not None and val_loss_grad[0] is not None:
-            direct_dLv_dlambda += gather_flat_grad(val_loss_grad)
+        Lv, _ = batch_loss(args, model, x_val, y_val, model, val_loss_func)
+        Lv_grad = grad(Lv, get_hyper_train(args, model), allow_unused=True)
+        if Lv_grad is not None and Lv_grad[0] is not None:
+            direct_dLv_dlambda += gather_flat_grad(Lv_grad)
         else:
             break
         if batch_idx >= args.val_batch_num: break

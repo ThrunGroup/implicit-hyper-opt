@@ -209,13 +209,13 @@ class CNN(nn.Module):
 
 
 class Net(nn.Module):
-    def __init__(self, num_layers, dropout, size, channel, weight_decay, num_classes=10, do_res=False,
-                 do_classification=True):
+    def __init__(self, num_layers, dropout, size, channel, weight_decay, num_classes=10, do_res=False, do_classification=True):
         super(Net, self).__init__()
         self.dropout = Variable(torch.FloatTensor([dropout]), requires_grad=True)
         self.weight_decay = Variable(torch.FloatTensor([weight_decay]), requires_grad=True)
         self.imsize = size * size * channel
-        if not do_classification: self.imsize = size * channel
+        if not do_classification:
+            self.imsize = size * channel
         self.do_res = do_res
         l_sizes = [self.imsize, self.imsize] + [50] * 20
         network = []
@@ -246,14 +246,13 @@ class Net(nn.Module):
     def L2_loss(self):
         loss = .0
         for p in self.parameters():
-            loss = loss + torch.sum(torch.mul(p, p)) * torch.exp(self.weight_decay)
+            loss += torch.sum(torch.mul(p, p)) * torch.exp(self.weight_decay)
         return loss
 
     def all_L2_loss(self):
         loss = .0
         count = 0
         for p in self.parameters():
-            loss = loss + torch.sum(
-                torch.mul(torch.exp(self.weight_decay[count: count + p.numel()]), torch.flatten(torch.mul(p, p))))
+            loss += torch.sum(torch.mul(torch.exp(self.weight_decay[count: count + p.numel()]), torch.flatten(torch.mul(p, p))))
             count += p.numel()
         return loss
