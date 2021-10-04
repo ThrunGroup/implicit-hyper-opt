@@ -288,15 +288,12 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
     dLv_dw /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
 
     # Calculate preconditioner  v1*(inverse Hessian approximation) [orange term in Figure 2]
-
-    # get dw / dlambda
     if args.hessian == 'neumann':
         flat_dLt_dw = torch.zeros(num_weights).cuda()
         model.train()
         for batch_idx, (x, y) in enumerate(train_loader):
             x, y = prepare_data(args, x, y)
             train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
-            # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
             model.zero_grad()
             hyper_optimizer.zero_grad()
             dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
@@ -308,14 +305,11 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
     else:
         raise Exception("Bad hessian specification! direct has been deprecated by Mo")
 
+    # get dw / dlambda
     model.train()  # train()
     for batch_idx, (x, y) in enumerate(train_loader):
         x, y = prepare_data(args, x, y)
         train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
-        # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-
-        model.zero_grad()
-        hyper_optimizer.zero_grad()
         dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
         flat_dLt_dw = gather_flat_grad(dLt_dw)
         model.zero_grad()
@@ -326,7 +320,6 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
         if batch_idx >= args.train_batch_num:
             break
     indirect_dLv_dlambda /= (batch_idx + 1)
-
 
     # Compute direct gradient of dLv_dlambda. This is usually 0.
     # TODO (@Mo): But will we need this in data augmentation setting?
