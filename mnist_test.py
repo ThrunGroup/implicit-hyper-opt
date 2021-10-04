@@ -293,10 +293,10 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
         model.train()
         for batch_idx, (x, y) in enumerate(train_loader):
             x, y = prepare_data(args, x, y)
-            train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
+            Lt, _ = batch_loss(args, model, x, y, model, train_loss_func)
             model.zero_grad()
             hyper_optimizer.zero_grad()
-            dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
+            dLt_dw = grad(Lt, model.parameters(), create_graph=True)
             flat_dLt_dw += gather_flat_grad(dLt_dw)
         flat_dLt_dw /= (batch_idx + 1)
         pre_conditioner = neumann_hyperstep_preconditioner(args, dLv_dw, flat_dLt_dw, model)
@@ -306,11 +306,11 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
         raise Exception("Bad hessian specification! direct has been deprecated by Mo")
 
     # get dw / dlambda
-    model.train()  # train()
+    model.train()
     for batch_idx, (x, y) in enumerate(train_loader):
         x, y = prepare_data(args, x, y)
-        train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
-        dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
+        Lt, _ = batch_loss(args, model, x, y, model, train_loss_func)
+        dLt_dw = grad(Lt, model.parameters(), create_graph=True)
         flat_dLt_dw = gather_flat_grad(dLt_dw)
         model.zero_grad()
         hyper_optimizer.zero_grad()
