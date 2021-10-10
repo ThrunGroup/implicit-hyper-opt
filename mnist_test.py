@@ -1,4 +1,6 @@
 import argparse
+import math
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -10,6 +12,7 @@ import copy
 # Local imports
 from data_loaders import load_mnist, load_cifar10, load_cifar100, load_ham
 from models.simple_models import CNN, Net, GaussianDropout
+from models.unet import UNet
 from utils.util import eval_hessian, eval_jacobian, gather_flat_grad, conjugate_gradiant
 
 
@@ -64,7 +67,8 @@ def setup_overfit_images():
                 args.break_perfect_val = True
                 args.hepochs = 500 # TODO: I shrunk this
                 args.hessian = 'identity'
-                args.num_neumann = 1
+                args.num_neumann = 3
+                args.hyper_train = 'data_aug'
                 if dataset == 'CIFAR10':
                     args.lrh = 1e-2
                 elif dataset == 'MNIST':
@@ -91,7 +95,7 @@ def init_hyper_train(args, model):
         # if args.cuda: model.weight_decay = model.weight_decay.cuda()
     elif args.hyper_train == 'all_weight':
         init_hyper = args.l2
-        num_p = sum(p.numel() for p in model.parameters())
+        num_p = sum(p.numel() for p in model.model_parameters())
         weights = np.ones(num_p) * init_hyper
         model.weight_decay = Variable(torch.FloatTensor(weights).cuda(), requires_grad=True)
         # if args.cuda: model.weight_decay = model.weight_decay.cuda()
@@ -117,20 +121,35 @@ def init_hyper_train(args, model):
     elif args.hyper_train == 'various':
         inits = np.zeros(3) - 3
         model.various = Variable(torch.FloatTensor(inits).cuda(), requires_grad=True)
+    elif args.hyper_train == 'data_aug':
+        if args.dataset == 'MNIST':
+            in_channels = 1
+            img_size = 28
+        else: # args.dataset == CIFAR10, CIFAR100
+            in_channels = 3
+            img_size = 32 # Jay: I can't find ham dataset img size. If anyone finds it, please implement here
+        depth = int(math.log(img_size, 2) - 3)
+        aug_model = UNet(in_channels=in_channels, n_classes=in_channels, wf=5, padding=1, depth = depth)
+        if args.cuda:
+            aug_model.cuda()
+        model.aug_model = aug_model
     return init_hyper
 
 
 def get_hyper_train(args, model):
     if args.hyper_train == 'weight':
-        return model.weight_decay
+        return [model.weight_decay]
     elif args.hyper_train == 'all_weight':
-        return model.weight_decay
+        return [model.weight_decay]
     elif args.hyper_train == 'opt_data':
-        return model.opt_data
+        return [model.opt_data]
     elif args.hyper_train == 'dropout':
-        return model.Gaussian.dropout
+        return [model.Gaussian.dropout]
     elif args.hyper_train == 'various':
-        return model.various
+        return [model.various]
+    elif args.hyper_train == 'data_aug':
+        assert model.aug_model
+        return list(model.aug_model.parameters())
 
 
 def train_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
@@ -148,6 +167,9 @@ def train_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
         reg_loss = network.L2_loss()
     elif args.hyper_train == 'dropout':
         predicted_y = network(x)
+    elif args.hyper_train == 'data_aug':
+        assert network.aug_model
+        predicted_y = network(network.aug_model(x))
     return F.cross_entropy(predicted_y, y, reduction=reduction) + reg_loss, predicted_y
 
 
@@ -222,6 +244,9 @@ def train(args, model, train_loader, optimizer, train_loss_func, elementary_epoc
         step += 1
         if batch_idx >= args.train_batch_num:
             break
+    for hyper_params in get_hyper_train(args, model): # When calling loss.backward(), hyper parameters grad is produced
+        hyper_params.grad *= 0
+
 
     if elementary_epoch % args.elementary_log_interval == 0:
         print(f'Train Epoch: {elementary_epoch} \tLoss: {total_loss:.6f}')
@@ -254,20 +279,16 @@ def evaluate(args, model, step, data_loader, name=None):
 
 
 def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
-    # set up placeholder for the partial derivative in each batch
-    total_dLv_dlambda = torch.zeros(get_hyper_train(args, model).size(0))
-    if args.cuda:
-        total_dLv_dlambda = total_dLv_dlambda.cuda()
-
+    hyper_optimizer.zero_grad()
     # Calculate v1 = dLv / dw
-    num_weights = sum(p.numel() for p in model.parameters())
+    num_weights = sum(p.numel() for p in model.model_parameters())
     dLv_dw = torch.zeros(num_weights).cuda()
     model.train()
     for batch_idx, (x, y) in enumerate(val_loader):
         model.zero_grad()
         x, y = prepare_data(args, x, y)
         val_loss, _ = batch_loss(args, model, x, y, model, val_loss_func)
-        val_loss_grad = grad(val_loss, model.parameters())
+        val_loss_grad = grad(val_loss, model.model_parameters())
         dLv_dw += gather_flat_grad(val_loss_grad)
         if batch_idx >= args.val_batch_num:
             break
@@ -278,7 +299,7 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
     # get dw / dlambda
     if args.hessian == 'identity' or args.hessian == 'direct': # TODO (@Mo): Warning!!! This may not work for 'direct' hessian. See https://github.com/ThrunGroup/implicit-hyper-opt/blob/weight_decay_overfit/mnist_test.py#L450-L499; the code may not be equivalent
         if args.hessian == 'identity':
-            pre_conditioner = dLv_dw # num_neumann = 0
+            pre_conditioner = dLv_dw.detach() # num_neumann = 0
             flat_pre_conditioner = pre_conditioner  # 2*pre_conditioner - args.lr*hessian_term
         model.train()  # train()
         for batch_idx, (x, y) in enumerate(train_loader):
@@ -287,20 +308,17 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
             # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
 
             model.zero_grad()
-            hyper_optimizer.zero_grad()
-            dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
+            dLt_dw = grad(train_loss, model.model_parameters(), create_graph=True)
             flat_dLt_dw = gather_flat_grad(dLt_dw)
 
             model.zero_grad()
-            hyper_optimizer.zero_grad()
             # This updates the hyperparameter's .grad  in the weight_decay overfit experiment
             # because the weight_decay is explicitly added to the train_loss_func for the Net via e^\lambda * w * w
-            flat_dLt_dw.backward(flat_pre_conditioner)
-            if get_hyper_train(args, model).grad is not None:
-                total_dLv_dlambda -= get_hyper_train(args, model).grad # this is the "-v_3" part of the paper
+            flat_dLt_dw.backward(flat_pre_conditioner) # hyperparams.grad = flat_pre_conditioner * d(dLt/dw)/ dlambda
             if batch_idx >= args.train_batch_num:
                 break
-        total_dLv_dlambda /= (batch_idx + 1)
+
+
     elif args.hessian == 'neumann':
         flat_dLt_dw = torch.zeros(num_weights).cuda()
         model.train()
@@ -310,7 +328,7 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
             # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
             model.zero_grad()
             hyper_optimizer.zero_grad()
-            dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
+            dLt_dw = grad(train_loss, model.model_parameters(), create_graph=True)
             flat_dLt_dw += gather_flat_grad(dLt_dw)
         flat_dLt_dw /= (batch_idx + 1)
 
@@ -319,7 +337,7 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
         i = 0
         while i < args.num_neumann:
             old_counter = counter
-            hessian_term = gather_flat_grad(grad(flat_dLt_dw, model.parameters(), grad_outputs=counter.view(-1), retain_graph=True))
+            hessian_term = gather_flat_grad(grad(flat_dLt_dw, model.model_parameters(), grad_outputs=counter.view(-1), retain_graph=True))
             counter = old_counter - args.lr * hessian_term
             pre_conditioner += counter
             i += 1
@@ -330,46 +348,54 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
             train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
             # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
 
-            model.zero_grad(), hyper_optimizer.zero_grad()
-            dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
+            model.zero_grad() #, hyper_optimizer.zero_grad()
+            dLt_dw = grad(train_loss, model.model_parameters(), create_graph=True)
             flat_dLt_dw = gather_flat_grad(dLt_dw)
 
-            model.zero_grad(), hyper_optimizer.zero_grad()
+            model.zero_grad()#, hyper_optimizer.zero_grad()
             flat_dLt_dw.backward(pre_conditioner)
-            if get_hyper_train(args, model).grad is not None:
-                total_dLv_dlambda -= get_hyper_train(args, model).grad
+        #     if get_hyper_train(args, model).grad is not None:
+        #         total_dLv_dlambda -= get_hyper_train(args, model).grad
             if batch_idx >= args.train_batch_num:
                 break
-        total_dLv_dlambda /= (batch_idx + 1)
+        # total_dLv_dlambda /= (batch_idx + 1)
+    for hyper_params in get_hyper_train(args, model):
+        hyper_params.grad /= -(batch_idx+1)
 
     # Compute direct gradient of dLv_dlambda. This is usually 0.
     # TODO (@Mo): But will we need this in data augmentation setting?
-    direct_dLv_dlambda = torch.zeros(get_hyper_train(args, model).size(0))
-    if args.cuda:
-        direct_dLv_dlambda = direct_dLv_dlambda.cuda()
 
+    direct_dLv_dlambda = [torch.zeros_like(hyper_params.grad) for hyper_params in get_hyper_train(args, model)]
     model.train()
     for batch_idx, (x_val, y_val) in enumerate(val_loader):
         model.zero_grad()
-        hyper_optimizer.zero_grad()
         x_val, y_val = prepare_data(args, x_val, y_val)
         val_loss, _ = batch_loss(args, model, x_val, y_val, model, val_loss_func)
-        val_loss_grad = grad(val_loss, get_hyper_train(args, model), allow_unused=True)
-        if val_loss_grad is not None and val_loss_grad[0] is not None:
-            direct_dLv_dlambda += gather_flat_grad(val_loss_grad)
-        else:
-            break
+        val_loss_grad = list(grad(val_loss, get_hyper_train(args, model), allow_unused=True))
+        for idx in range(len(direct_dLv_dlambda)):
+            if val_loss_grad[idx] != None:
+                direct_dLv_dlambda[idx] += val_loss_grad[idx]
         if batch_idx >= args.val_batch_num: break
-    direct_dLv_dlambda /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
-    print("Direct", direct_dLv_dlambda.abs().sum()) # Always prints 0 for MNIST
+    for direct_grad in direct_dLv_dlambda:
+        direct_grad /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
 
-    get_hyper_train(args, model).grad = direct_dLv_dlambda + total_dLv_dlambda
-    print("weight={}, update={}".format(get_hyper_train(args, model).norm(), get_hyper_train(args, model).grad.norm()))
+    # Update direct dLv_dlambda to hyper_params.grad
+    # idx = 0
+    # for hyper_params in get_hyper_train(args, model):
+    #     hyper_params.grad += direct_dLv_dlambda[idx]
+    #     idx += 1
+    flatten_direct_dLv_dlambda = gather_flat_grad(direct_dLv_dlambda)
+    print("Direct", flatten_direct_dLv_dlambda.abs().sum()) # Always prints 0 for MNIST
+
+    # get_hyper_train(args, model).grad = direct_dLv_dlambda + total_dLv_dlambda
+    flatten_hyper_params = gather_flat_grad(get_hyper_train(args, model))
+    flatten_hyper_grads = torch.cat([p.grad.view(-1) for p in get_hyper_train(args, model)])
+    print("weight={}, update={}".format(flatten_hyper_params.norm(), flatten_hyper_grads.norm()))
 
     hyper_optimizer.step() # TODO (@Mo): Understand hyper_optimizer.step(), get_hyper_train(), kfac_opt.fake_step()?
     model.zero_grad()
     hyper_optimizer.zero_grad()
-    return get_hyper_train(args, model), get_hyper_train(args, model).grad
+    return flatten_hyper_params, flatten_hyper_grads
 
 
 def experiment(args):
@@ -384,42 +410,80 @@ def experiment(args):
     np.random.seed(args.seed)
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
-
+    random.seed(args.seed)
+    ###############################################################################
     # Setup dataset
+    ###############################################################################
     # TODO (JON): Verify that the loaders are shuffling the validation / test sets.
     if args.dataset == 'MNIST':
         num_train = args.datasize
         if num_train == -1:
             num_train = 50000
-        train_loader, val_loader, test_loader = load_mnist(args.batch_size, subset=[args.datasize, args.valsize, args.testsize], num_train=num_train)
+        train_loader, val_loader, test_loader = load_mnist(args.batch_size,
+                                                           subset=[args.datasize, args.valsize, args.testsize],
+                                                           num_train=num_train)
         in_channel = 1
         imsize = 28
+        fc_shape = 800
         num_classes = 10
+    elif args.dataset == 'CIFAR10':
+        num_train = args.datasize
+        if num_train == -1: num_train = 45000
+        train_loader, val_loader, test_loader = load_cifar10(args.batch_size, num_train=num_train,
+                                                             augmentation=True,
+                                                             subset=[args.datasize, args.valsize, args.testsize])
+        in_channel = 3
+        imsize = 32
+        fc_shape = 250
+        num_classes = 10
+    elif args.dataset == 'CIFAR100':
+        num_train = args.datasize
+        if num_train == -1: num_train = 45000
+        train_loader, val_loader, test_loader = load_cifar100(args.batch_size, num_train=num_train,
+                                                              augmentation=True,
+                                                              subset=[args.datasize, args.valsize, args.testsize])
+        in_channel = 3
+        imsize = 32
+        fc_shape = 250
+        num_classes = 100
     else:
-        raise Exception("Must choose MNIST dataset")
+        raise Exception("Using Wrong data_set")
     # TODO (JON): Right now we are not using the test loader for anything.  Should evaluate it occasionally.
 
     # Setup model
     if args.model == "mlp":
         model = Net(args.num_layers, args.dropout, imsize, in_channel, args.l2, num_classes=num_classes)
+    elif args.model == "cnn":
+        model = CNN(args.num_layers, args.dropout, fc_shape, args.l2, in_channel, imsize, do_alexnet=False,
+                    num_classes=num_classes)
+    elif args.model == "alexnet":
+        model = CNN(args.num_layers, args.dropout, fc_shape, args.l2, in_channel, imsize, do_alexnet=True,
+                    num_classes=num_classes)
     else:
         raise Exception("bad model")
 
-    hyper = init_hyper_train(args, model)  # We need this when doing all_weight
     if args.cuda:
         model = model.cuda()
-        model.weight_decay = model.weight_decay.cuda()
-        # model.Gaussian.dropout = model.Gaussian.dropout.cuda()
+        model.weight_decay.cuda()
+    model_state_dict = copy.deepcopy(model.state_dict())  # To initialize child classifier for every epochs
+    hyper = init_hyper_train(args, model)  # We need this when doing all_weight
+
+
+
 
     # Setup Optimizer
     # TODO (JON):  Add argument for other optimizers?
-    init_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)  # , momentum=0.9)
-    hyper_optimizer = torch.optim.RMSprop([get_hyper_train(args, model)])  # , lr=args.lrh)  # try 0.1 as lr
+    init_optimizer = torch.optim.Adam(model.model_parameters(), lr=args.lr)  # , momentum=0.9)
+    hyper_optimizer = torch.optim.RMSprop(get_hyper_train(args, model))  # , lr=args.lrh)  # try 0.1 as lr
 
     # Perform the training
+    aug_model = model.aug_model
+    for name, param in aug_model.named_parameters():
+        print(name, param.shape)
     global_step = 0
     _1, _2 = 0, 0
     for epoch_h in range(0, args.hepochs + 1):
+
         print(f"Hyper epoch: {epoch_h}")
         if epoch_h % args.hyper_log_interval == 0:
             if args.hyper_train == 'opt_data':
@@ -433,6 +497,7 @@ def experiment(args):
             eval_test_corr, eval_test_loss = evaluate(args, model, epoch_h, test_loader, 'test')
             if args.break_perfect_val and eval_val_corr >= 0.999 and eval_train_corr >= 0.999:
                 break
+
 
         min_loss = 10e8
         elementary_epochs = args.epochs
@@ -455,6 +520,8 @@ def experiment(args):
         #     continue
 
         _1, _2 = hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer)
+
+
 
 
 
@@ -527,10 +594,10 @@ def get_args():
                         help='whether to reset parameter')
     parser.add_argument('--jacobian', type=str, default="direct", choices=['direct', 'product'],
                         help='which method to compute jacobian')
-    parser.add_argument('--hessian', type=str, default="identity", choices=['direct', 'identity'],
+    parser.add_argument('--hessian', type=str, default="identity", choices=['direct', 'identity', 'neumann'],
                         help='which method to compute hessian')
     parser.add_argument('--hyper_train', type=str, default="opt_data",
-                        choices=['weight', 'all_weight', 'dropout', 'opt_data', 'various'],
+                        choices=['weight', 'all_weight', 'dropout', 'opt_data', 'various', 'data_aug'],
                         help='which hyperparameter to train')
 
     # Logging parameters

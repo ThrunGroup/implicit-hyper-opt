@@ -110,6 +110,8 @@ class SimpleConvNet(nn.Module):
 
         self.fc = nn.Linear(7*7*32, 10)
 
+
+
     def forward(self, x):
         out = self.layer1(x)
         out = self.layer2(out)
@@ -119,7 +121,8 @@ class SimpleConvNet(nn.Module):
 
 
 class CNN(nn.Module):
-    def __init__(self, num_layers, dropout, size, weight_decay, in_channel, imsize, do_alexnet=False, num_classes=10):
+    def __init__(self, num_layers, dropout, size, weight_decay, in_channel, imsize, do_alexnet=False, num_classes=10,
+                 aug_model=None):
         super(CNN, self).__init__()
         self.dropout = Variable(torch.FloatTensor([dropout]), requires_grad=True)
         self.weight_decay = Variable(torch.FloatTensor([weight_decay]), requires_grad=True)
@@ -176,6 +179,9 @@ class CNN(nn.Module):
                 nn.Linear(250, self.num_classes),
             )
 
+        self.model_params_keys = dict(self.named_parameters()).keys()
+        self.aug_model = aug_model
+
     def do_train(self):
         self.features.train()
         self.classifier.train()
@@ -183,6 +189,9 @@ class CNN(nn.Module):
     def do_eval(self):
         self.features.train()
         self.classifier.train()
+
+    def set_aug_model(self, aug_model):
+        self.aug_model = aug_model
 
     def forward(self, x):
         x = self.features(x)
@@ -207,10 +216,17 @@ class CNN(nn.Module):
             count += p.numel()
         return loss
 
+    def model_parameters(self):  # To prevent aug_model params are included in model params
+        if self.aug_model is None:
+            return self.parameters()
+        else:
+            for name, params in self.named_parameters():
+                if name not in self.aug_model.named_parameters().keys():
+                    yield params
 
 class Net(nn.Module):
     def __init__(self, num_layers, dropout, size, channel, weight_decay, num_classes=10, do_res=False,
-                 do_classification=True):
+                 do_classification=True, aug_model=None):
         super(Net, self).__init__()
         self.dropout = Variable(torch.FloatTensor([dropout]), requires_grad=True)
         self.weight_decay = Variable(torch.FloatTensor([weight_decay]), requires_grad=True)
@@ -228,6 +244,8 @@ class Net(nn.Module):
             #network.append(nn.Dropout())
         network.append(nn.Linear(l_sizes[num_layers], num_classes))
         self.net = nn.Sequential(*network)
+        self.model_params_keys = dict(self.named_parameters()).keys()
+        self.aug_model = aug_model
 
     def forward(self, x):
         cur_shape = x.shape
@@ -243,6 +261,9 @@ class Net(nn.Module):
     def do_eval(self):
         self.net.eval()
 
+    def set_aug_model(self, aug_model):
+        self.aug_model = aug_model
+
     def L2_loss(self):
         loss = .0
         for p in self.parameters():
@@ -257,3 +278,14 @@ class Net(nn.Module):
                 torch.mul(torch.exp(self.weight_decay[count: count + p.numel()]), torch.flatten(torch.mul(p, p))))
             count += p.numel()
         return loss
+
+    def model_parameters(self): # To prevent aug_model params are included in model params
+        if self.aug_model is None:
+            for param in self.parameters():
+                yield param
+        else:
+            for name, param in self.named_parameters():
+                if name in self.model_params_keys:
+                    yield param
+
+

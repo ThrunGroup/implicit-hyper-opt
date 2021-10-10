@@ -5,6 +5,7 @@ import ipdb
 import torch
 from torch import nn
 import torch.nn.functional as F
+import math
 
 
 class UNet(nn.Module):
@@ -13,7 +14,7 @@ class UNet(nn.Module):
         in_channels=1,
         n_classes=2,
         depth=5,
-        wf=6,
+        wf=5,
         padding=False,
         batch_norm=False,
         do_noise_channel=False,
@@ -72,6 +73,16 @@ class UNet(nn.Module):
         self.last = nn.Conv2d(prev_channels, n_classes, kernel_size=1)
 
     def forward(self, x, use_zero_noise=False, class_label=None):
+        # if x.size(-1) % (2 ** self.depth) != 0:
+        #     remainder = x.size(-1) % (2 ** self.depth)
+        #     to_pad = abs(remainder - 2 ** (self.depth))
+        #     to_pad_left = math.floor(to_pad/2.0)
+        #     to_pad_right = math.ceil(to_pad/2.0)
+        #     to_pad_top = to_pad_left
+        #     to_pad_bottom = to_pad_right
+        #     pad = (to_pad_left, to_pad_right, to_pad_top, to_pad_bottom)
+        #     x = F.pad(x, pad=pad)
+
         blocks = []
 
         do_class_generation = False
@@ -160,3 +171,9 @@ class UNetUpBlock(nn.Module):
         out = self.conv_block(out)
 
         return out
+
+import math
+# a = 28
+# img = torch.randn(20, 1, a, a)
+# unet = UNet(n_classes=1, padding = 1, depth=3)
+# print(unet(img).shape)
