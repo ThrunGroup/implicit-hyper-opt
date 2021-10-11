@@ -128,7 +128,7 @@ def init_hyper_train(args, model):
         else: # args.dataset == CIFAR10, CIFAR100
             in_channels = 3
             img_size = 32 # Jay: I can't find ham dataset img size. If anyone finds it, please implement here
-        depth = int(math.log(img_size, 2) - 3)
+        depth = int(math.log(img_size, 2) - 2)
         aug_model = UNet(in_channels=in_channels, n_classes=in_channels, wf=5, padding=1, depth = depth)
         if args.cuda:
             aug_model.cuda()
@@ -232,6 +232,9 @@ def train(args, model, train_loader, optimizer, train_loss_func, elementary_epoc
     total_loss = 0.0
     # TODO (JON): Sample a mini-batch
     # TODO (JON): Change x to input
+    if model.aug_model:
+        for param in model.aug_model.parameters():
+            param.requires_grad = False
     for batch_idx, (x, y) in enumerate(train_loader):
         # Take a gradient step for this mini-batch
         optimizer.zero_grad()
@@ -244,12 +247,15 @@ def train(args, model, train_loader, optimizer, train_loss_func, elementary_epoc
         step += 1
         if batch_idx >= args.train_batch_num:
             break
-    for hyper_params in get_hyper_train(args, model): # When calling loss.backward(), hyper parameters grad is produced
-        hyper_params.grad *= 0
+    # for hyper_params in get_hyper_train(args, model): # When calling loss.backward(), hyper parameters grad is produced
+    #     hyper_params.grad *= 0
 
 
     if elementary_epoch % args.elementary_log_interval == 0:
         print(f'Train Epoch: {elementary_epoch} \tLoss: {total_loss:.6f}')
+    if model.aug_model:
+        for param in model.aug_model.parameters():
+            param.requires_grad = True
 
     return step, total_loss / (batch_idx + 1)
 
@@ -480,6 +486,8 @@ def experiment(args):
     aug_model = model.aug_model
     for name, param in aug_model.named_parameters():
         print(name, param.shape)
+    for name, param in model.model_named_parameters():
+        print(name, param.shape)
     global_step = 0
     _1, _2 = 0, 0
     for epoch_h in range(0, args.hepochs + 1):
@@ -503,7 +511,7 @@ def experiment(args):
         elementary_epochs = args.epochs
         if epoch_h == 0:
             elementary_epochs = args.init_epochs
-        if True:  # epoch_h == 0: # TODO (MO): Why is there an if True?
+        if epoch_h == 0:  # epoch_h == 0: # TODO (MO): Why is there an if True?
             optimizer = init_optimizer
         # else:
         #    optimizer = sec_optimizer

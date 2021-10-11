@@ -288,4 +288,13 @@ class Net(nn.Module):
                 if name in self.model_params_keys:
                     yield param
 
+    def model_named_parameters(self):
+        if self.aug_model is None:
+            for name, param in self.named_parameters():
+                yield name, param
+        else:
+            for name, param in self.named_parameters():
+                if name in self.model_params_keys:
+                    yield name, param
+
 
