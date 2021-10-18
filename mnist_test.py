@@ -20,17 +20,17 @@ def setup_overfit_validation(dataset, model, num_layers):
     # Warning: overwrites the global args. Bad form.
 
     cur_args = copy.deepcopy(args)
-    cur_args.datasize = 50
-    cur_args.valsize = 50
+    cur_args.datasize = 100
+    cur_args.valsize = 30
     cur_args.testsize = -1
 
     cur_args.lr = 1e-4
     # cur_args.lrh = 1e-2
 
-    cur_args.batch_size = cur_args.datasize
+    cur_args.batch_size = 10
 
-    cur_args.train_batch_num = 1
-    cur_args.val_batch_num = 1
+    cur_args.train_batch_num = 1000
+    cur_args.val_batch_num = 1000
     cur_args.eval_batch_num = 100
 
     cur_args.dataset = dataset
@@ -41,11 +41,11 @@ def setup_overfit_validation(dataset, model, num_layers):
     cur_args.l2 = -4
 
     cur_args.hessian = 'identity'
-    cur_args.hepochs = 1000
-    cur_args.epochs = 5
+    cur_args.hepochs = 50
+    cur_args.epochs = 1000
     cur_args.init_epochs = 5
 
-    cur_args.elementary_log_interval = 5
+    cur_args.elementary_log_interval = 50
     cur_args.hyper_log_interval = 50
 
     cur_args.graph_hessian = False
@@ -56,17 +56,17 @@ def setup_overfit_images():
     argss = []
     # TODO: Try other optimizers! Ex. Adam?
     for dataset in ['MNIST']:  # ['MNIST', 'CIFAR10']
-        for model in ['mlp']: # ['mlp', 'alexnet', 'resnet', 'cnn']
+        for model in ['mlp']:  # ['mlp', 'alexnet', 'resnet', 'cnn']
             layer_selection = [1]
-#                 if model == 'mlp':
-#                     layer_selection = [1, 0]
+            #                 if model == 'mlp':
+            #                     layer_selection = [1, 0]
             for num_layers in layer_selection:
                 args = setup_overfit_validation(dataset, model, num_layers)
                 args.hyper_log_interval = 1
-                args.testsize = 50
+                args.testsize = 1000
                 args.break_perfect_val = True
-                args.hepochs = 500 # TODO: I shrunk this
-                args.hessian = 'identity'
+                args.hepochs = 50  # TODO: I shrunk this
+                args.hessian = 'neumann'
                 args.num_neumann = 3
                 args.hyper_train = 'data_aug'
                 if dataset == 'CIFAR10':
@@ -125,11 +125,11 @@ def init_hyper_train(args, model):
         if args.dataset == 'MNIST':
             in_channels = 1
             img_size = 28
-        else: # args.dataset == CIFAR10, CIFAR100
+        else:  # args.dataset == CIFAR10, CIFAR100
             in_channels = 3
-            img_size = 32 # Jay: I can't find ham dataset img size. If anyone finds it, please implement here
-        depth = int(math.log(img_size, 2) - 2)
-        aug_model = UNet(in_channels=in_channels, n_classes=in_channels, wf=5, padding=1, depth = depth)
+            img_size = 32  # Jay: I can't find ham dataset img size. If anyone finds it, please implement here
+        depth = int(math.log(img_size, 2) - 3)
+        aug_model = UNet(in_channels=in_channels, n_classes=in_channels, wf=1, padding=1, depth=depth)
         if args.cuda:
             aug_model.cuda()
         model.aug_model = aug_model
@@ -149,7 +149,7 @@ def get_hyper_train(args, model):
         return [model.various]
     elif args.hyper_train == 'data_aug':
         assert model.aug_model
-        return list(model.aug_model.parameters())
+        return model.aug_model.parameters()
 
 
 def train_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
@@ -227,12 +227,13 @@ def save_learned(datas, is_mnist, batch_size, args):
     fig.savefig('images/learned_images_' + args.dataset + '_' + str(args.batch_size) + '_' + args.model + '.pdf')
     plt.close(fig)
 
+
 def train(args, model, train_loader, optimizer, train_loss_func, elementary_epoch, step):
     model.train()  # _train()
     total_loss = 0.0
     # TODO (JON): Sample a mini-batch
     # TODO (JON): Change x to input
-    if model.aug_model:
+    if model.aug_model: # Reduce unnecessary backward computations
         for param in model.aug_model.parameters():
             param.requires_grad = False
     for batch_idx, (x, y) in enumerate(train_loader):
@@ -249,7 +250,6 @@ def train(args, model, train_loader, optimizer, train_loss_func, elementary_epoc
             break
     # for hyper_params in get_hyper_train(args, model): # When calling loss.backward(), hyper parameters grad is produced
     #     hyper_params.grad *= 0
-
 
     if elementary_epoch % args.elementary_log_interval == 0:
         print(f'Train Epoch: {elementary_epoch} \tLoss: {total_loss:.6f}')
@@ -278,34 +278,35 @@ def evaluate(args, model, step, data_loader, name=None):
         total_loss /= (batch_idx + 1)
 
     # TODO (JON): Clean up print and logging?
-    data_size = args.batch_size * (batch_idx + 1) # TODO (Mo): No
+    data_size = args.batch_size * (batch_idx + 1)  # TODO (Mo): No
     acc = float(correct) / data_size
     print(f'Evaluate {name}, {step}: Average loss: {total_loss:.4f}, Accuracy: {correct}/{data_size} ({acc}%)')
     return acc, total_loss
 
 
-def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
+def hyperoptimize(args, model, train_loader, val_loader, optimizer, hyper_optimizer):
     hyper_optimizer.zero_grad()
     # Calculate v1 = dLv / dw
     num_weights = sum(p.numel() for p in model.model_parameters())
     dLv_dw = torch.zeros(num_weights).cuda()
     model.train()
     for batch_idx, (x, y) in enumerate(val_loader):
-        model.zero_grad()
+        optimizer.zero_grad()
         x, y = prepare_data(args, x, y)
         val_loss, _ = batch_loss(args, model, x, y, model, val_loss_func)
         val_loss_grad = grad(val_loss, model.model_parameters())
         dLv_dw += gather_flat_grad(val_loss_grad)
         if batch_idx >= args.val_batch_num:
             break
-    dLv_dw /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
+    dLv_dw /= (
+            batch_idx + 1)  # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
 
     # Calculate preconditioner  v1*(inverse Hessian approximation) [orange term in Figure 2]
 
     # get dw / dlambda
-    if args.hessian == 'identity' or args.hessian == 'direct': # TODO (@Mo): Warning!!! This may not work for 'direct' hessian. See https://github.com/ThrunGroup/implicit-hyper-opt/blob/weight_decay_overfit/mnist_test.py#L450-L499; the code may not be equivalent
+    if args.hessian == 'identity' or args.hessian == 'direct':  # TODO (@Mo): Warning!!! This may not work for 'direct' hessian. See https://github.com/ThrunGroup/implicit-hyper-opt/blob/weight_decay_overfit/mnist_test.py#L450-L499; the code may not be equivalent
         if args.hessian == 'identity':
-            pre_conditioner = dLv_dw.detach() # num_neumann = 0
+            pre_conditioner = dLv_dw.detach()  # num_neumann = 0
             flat_pre_conditioner = pre_conditioner  # 2*pre_conditioner - args.lr*hessian_term
         model.train()  # train()
         for batch_idx, (x, y) in enumerate(train_loader):
@@ -313,14 +314,14 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
             train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
             # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
 
-            model.zero_grad()
+            optimizer.zero_grad()
             dLt_dw = grad(train_loss, model.model_parameters(), create_graph=True)
             flat_dLt_dw = gather_flat_grad(dLt_dw)
 
-            model.zero_grad()
+            optimizer.zero_grad()
             # This updates the hyperparameter's .grad  in the weight_decay overfit experiment
             # because the weight_decay is explicitly added to the train_loss_func for the Net via e^\lambda * w * w
-            flat_dLt_dw.backward(flat_pre_conditioner) # hyperparams.grad = flat_pre_conditioner * d(dLt/dw)/ dlambda
+            flat_dLt_dw.backward(flat_pre_conditioner)  # hyperparams.grad = flat_pre_conditioner * d(dLt/dw)/ dlambda
             if batch_idx >= args.train_batch_num:
                 break
 
@@ -332,7 +333,7 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
             x, y = prepare_data(args, x, y)
             train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
             # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-            model.zero_grad()
+            optimizer.zero_grad()
             hyper_optimizer.zero_grad()
             dLt_dw = grad(train_loss, model.model_parameters(), create_graph=True)
             flat_dLt_dw += gather_flat_grad(dLt_dw)
@@ -343,7 +344,8 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
         i = 0
         while i < args.num_neumann:
             old_counter = counter
-            hessian_term = gather_flat_grad(grad(flat_dLt_dw, model.model_parameters(), grad_outputs=counter.view(-1), retain_graph=True))
+            hessian_term = gather_flat_grad(
+                grad(flat_dLt_dw, model.model_parameters(), grad_outputs=counter.view(-1), retain_graph=True))
             counter = old_counter - args.lr * hessian_term
             pre_conditioner += counter
             i += 1
@@ -354,54 +356,111 @@ def hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer):
             train_loss, _ = batch_loss(args, model, x, y, model, train_loss_func)
             # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
 
-            model.zero_grad() #, hyper_optimizer.zero_grad()
+            optimizer.zero_grad()  # , hyper_optimizer.zero_grad()
             dLt_dw = grad(train_loss, model.model_parameters(), create_graph=True)
             flat_dLt_dw = gather_flat_grad(dLt_dw)
 
-            model.zero_grad()#, hyper_optimizer.zero_grad()
+            optimizer.zero_grad()
             flat_dLt_dw.backward(pre_conditioner)
-        #     if get_hyper_train(args, model).grad is not None:
-        #         total_dLv_dlambda -= get_hyper_train(args, model).grad
+            #     if get_hyper_train(args, model).grad is not None:
+            #         total_dLv_dlambda -= get_hyper_train(args, model).grad
             if batch_idx >= args.train_batch_num:
                 break
         # total_dLv_dlambda /= (batch_idx + 1)
     for hyper_params in get_hyper_train(args, model):
-        hyper_params.grad /= -(batch_idx+1)
+        hyper_params.grad /= -(batch_idx + 1)
 
     # Compute direct gradient of dLv_dlambda. This is usually 0.
     # TODO (@Mo): But will we need this in data augmentation setting?
 
-    direct_dLv_dlambda = [torch.zeros_like(hyper_params.grad) for hyper_params in get_hyper_train(args, model)]
-    model.train()
-    for batch_idx, (x_val, y_val) in enumerate(val_loader):
-        model.zero_grad()
-        x_val, y_val = prepare_data(args, x_val, y_val)
-        val_loss, _ = batch_loss(args, model, x_val, y_val, model, val_loss_func)
-        val_loss_grad = list(grad(val_loss, get_hyper_train(args, model), allow_unused=True))
-        for idx in range(len(direct_dLv_dlambda)):
-            if val_loss_grad[idx] != None:
-                direct_dLv_dlambda[idx] += val_loss_grad[idx]
-        if batch_idx >= args.val_batch_num: break
-    for direct_grad in direct_dLv_dlambda:
-        direct_grad /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
+    # direct_dLv_dlambda = [torch.zeros_like(hyper_params.grad) for hyper_params in get_hyper_train(args, model)]
+    # model.train()
+    # for batch_idx, (x_val, y_val) in enumerate(val_loader):
+    #     model.zero_grad()
+    #     x_val, y_val = prepare_data(args, x_val, y_val)
+    #     val_loss, _ = batch_loss(args, model, x_val, y_val, model, val_loss_func)
+    #     val_loss_grad = list(grad(val_loss, get_hyper_train(args, model), allow_unused=True))
+    #     for idx in range(len(direct_dLv_dlambda)):
+    #         if val_loss_grad[idx] != None:
+    #             direct_dLv_dlambda[idx] += val_loss_grad[idx]
+    #     if batch_idx >= args.val_batch_num: break
+    # for direct_grad in direct_dLv_dlambda:
+    #     direct_grad /= (batch_idx + 1) # TODO (@Mo): This is very bad, because it does not account for a potentially uneven batch at the end
 
     # Update direct dLv_dlambda to hyper_params.grad
     # idx = 0
     # for hyper_params in get_hyper_train(args, model):
     #     hyper_params.grad += direct_dLv_dlambda[idx]
     #     idx += 1
-    flatten_direct_dLv_dlambda = gather_flat_grad(direct_dLv_dlambda)
-    print("Direct", flatten_direct_dLv_dlambda.abs().sum()) # Always prints 0 for MNIST
+    # flatten_direct_dLv_dlambda = gather_flat_grad(direct_dLv_dlambda)
+    # print("Direct", flatten_direct_dLv_dlambda.abs().sum()) # Always prints 0 for MNIST
 
     # get_hyper_train(args, model).grad = direct_dLv_dlambda + total_dLv_dlambda
     flatten_hyper_params = gather_flat_grad(get_hyper_train(args, model))
     flatten_hyper_grads = torch.cat([p.grad.view(-1) for p in get_hyper_train(args, model)])
     print("weight={}, update={}".format(flatten_hyper_params.norm(), flatten_hyper_grads.norm()))
 
-    hyper_optimizer.step() # TODO (@Mo): Understand hyper_optimizer.step(), get_hyper_train(), kfac_opt.fake_step()?
-    model.zero_grad()
+    hyper_optimizer.step()  # TODO (@Mo): Understand hyper_optimizer.step(), get_hyper_train(), kfac_opt.fake_step()?
+    optimizer.zero_grad()
     hyper_optimizer.zero_grad()
     return flatten_hyper_params, flatten_hyper_grads
+
+
+def plot_augmentation(args, loader: torch.utils.data.DataLoader, aug_model: torch.nn.Module = None, n=10):
+    if not aug_model:
+        return None
+    rows = n
+    columns = 2
+    fig = plt.figure(figsize=(columns * 2, rows * 2))
+    iter_num = 1
+    with torch.no_grad():
+        for i, (x, y) in enumerate(loader):
+            x, y = prepare_data(args, x, y)
+            aug_x = aug_model(x)
+            for idx in range(x.size(0)):
+                before_img = x[idx].transpose(0,
+                                              2).detach()  # pyplot takes the image whose RGB value is in the last idx
+                after_img = aug_x[idx].transpose(0, 2).detach()
+                fig.add_subplot(rows, columns, iter_num)
+                plt.imshow(before_img, interpolation="nearest")
+                plt.axis('off')
+                fig.add_subplot(rows, columns, iter_num + 1)
+                plt.imshow(after_img, interpolation="nearest")
+                plt.axis('off')
+                iter_num += 2
+                if iter_num > 2 * n:
+                    plt.show()
+                    return None  # ends ploting
+
+
+def get_identity_map(data_loader: torch.utils.data.DataLoader, aug_model: torch.nn.Module = None):
+    hyper_optimizer = torch.optim.Adam(aug_model.parameters())
+    if aug_model:
+        aug_model.train()
+        min_loss = 3e-3
+        for epoch in range(0, 100):
+            total_loss = .0
+            for i, (x, y) in enumerate(data_loader):
+                x = x.cuda()
+                hyper_optimizer.zero_grad()
+                loss = F.mse_loss(aug_model(x), x)
+                loss.backward()
+                hyper_optimizer.step()
+                total_loss += loss.detach() / x.size(0)
+            if total_loss < min_loss:
+                break
+        torch.save(aug_model.state_dict(), "aug_model_identity/identity.pt")
+
+
+def augment_train_dataset(args, train_loader: torch.utils.data.DataLoader, aug_model: torch.nn.Module = None):
+    if not aug_model:
+        return train_loader
+    new_train_dataset = []
+    for i, (x, y) in enumerate(train_loader):
+        x, y = prepare_data(args, x, y)
+        new_train_dataset.append((x, y))
+        new_train_dataset.append((aug_model(x), y))
+    return new_train_dataset
 
 
 def experiment(args):
@@ -471,11 +530,9 @@ def experiment(args):
     if args.cuda:
         model = model.cuda()
         model.weight_decay.cuda()
+    hyper = init_hyper_train(args, model)
     model_state_dict = copy.deepcopy(model.state_dict())  # To initialize child classifier for every epochs
     hyper = init_hyper_train(args, model)  # We need this when doing all_weight
-
-
-
 
     # Setup Optimizer
     # TODO (JON):  Add argument for other optimizers?
@@ -483,29 +540,26 @@ def experiment(args):
     hyper_optimizer = torch.optim.RMSprop(get_hyper_train(args, model))  # , lr=args.lrh)  # try 0.1 as lr
 
     # Perform the training
-    aug_model = model.aug_model
-    for name, param in aug_model.named_parameters():
-        print(name, param.shape)
-    for name, param in model.model_named_parameters():
-        print(name, param.shape)
     global_step = 0
     _1, _2 = 0, 0
-    for epoch_h in range(0, args.hepochs + 1):
+    plot_augmentation(args, val_loader, model.aug_model, 5)
 
+    for epoch_h in range(0, args.hepochs + 1):
         print(f"Hyper epoch: {epoch_h}")
         if epoch_h % args.hyper_log_interval == 0:
             if args.hyper_train == 'opt_data':
                 if args.dataset == 'MNIST':
-                    save_learned(get_hyper_train(args, model).reshape(args.batch_size, imsize, imsize), True, args.batch_size, args)
+                    save_learned(get_hyper_train(args, model).reshape(args.batch_size, imsize, imsize), True,
+                                 args.batch_size, args)
             elif args.hyper_train == 'various':
-                print(f"saturation: {torch.sigmoid(model.various[0])}, brightness: {torch.sigmoid(model.various[1])}, decay: {torch.exp(model.various[2])}")
+                print(
+                    f"saturation: {torch.sigmoid(model.various[0])}, brightness: {torch.sigmoid(model.various[1])}, decay: {torch.exp(model.various[2])}")
             eval_train_corr, eval_train_loss = evaluate(args, model, global_step, train_loader, 'train')
             # TODO (JON):  I don't know if we want normal train loss, or eval?
             eval_val_corr, eval_val_loss = evaluate(args, model, epoch_h, val_loader, 'valid')
             eval_test_corr, eval_test_loss = evaluate(args, model, epoch_h, test_loader, 'test')
             if args.break_perfect_val and eval_val_corr >= 0.999 and eval_train_corr >= 0.999:
                 break
-
 
         min_loss = 10e8
         elementary_epochs = args.epochs
@@ -515,8 +569,17 @@ def experiment(args):
             optimizer = init_optimizer
         # else:
         #    optimizer = sec_optimizer
+
+        # if epoch_h == 0:
+        #     continue
+
+        _1, _2 = hyperoptimize(args, model, train_loader, val_loader, optimizer, hyper_optimizer)
+        aug_model = copy.deepcopy(model.aug_model)
+        model.load_state_dict(model_state_dict)
+        model.aug_model = aug_model
         for epoch in range(1, elementary_epochs + 1):
-            global_step, epoch_train_loss = train(args, model, train_loader, optimizer, train_loss_func, epoch, global_step)
+            global_step, epoch_train_loss = train(args, model, train_loader, optimizer, train_loss_func, epoch,
+                                                  global_step)
             if np.isnan(epoch_train_loss):
                 print("Loss is nan, stop the loop")
                 break
@@ -524,13 +587,32 @@ def experiment(args):
                 print(f"Breaking on epoch {epoch}. train_loss = {epoch_train_loss}, min_loss = {min_loss}")
                 break
             min_loss = epoch_train_loss
-        # if epoch_h == 0:
-        #     continue
+    torch.save(model.aug_model.state_dict(), 'aug_model_best/best5.pt')
+    model_1 = Net(args.num_layers, args.dropout, imsize, in_channel, args.l2, num_classes=num_classes).cuda()
+    model_2 = Net(args.num_layers, args.dropout, imsize, in_channel, args.l2, num_classes=num_classes).cuda()
+    optimizer_1 = torch.optim.Adam(model_1.parameters(), args.lr)
+    optimizer_2 = torch.optim.Adam(model_2.parameters(), args.lr)
+    new_train_loader = augment_train_dataset(args, train_loader, model.aug_model)
+    step1 = 0
+    step2 = 0
+    plot_augmentation(args, test_loader, model.aug_model, 5)
+    for i in range(args.epochs):
+        print('model_1')
+        step1, train_loss1 = train(args, model_1, train_loader, optimizer_1, val_loss_func, i, step1)
+        print('model_2')
+        step2, tran_loss2 = train(args, model_2, new_train_loader, optimizer_2, val_loss_func, i, step2)
 
-        _1, _2 = hyperoptimize(args, model, train_loader, val_loader, hyper_optimizer)
-
-
-
+        if i % 10 == 0:
+            print('model_1')
+            eval_train_corr, eval_train_loss = evaluate(args, model_1, i, train_loader, 'train')
+            # TODO (JON):  I don't know if we want normal train loss, or eval?
+            eval_val_corr, eval_val_loss = evaluate(args, model_1, i, val_loader, 'valid')
+            eval_test_corr, eval_test_loss = evaluate(args, model_1, i, test_loader, 'test')
+            print('model_2')
+            eval_train_corr, eval_train_loss = evaluate(args, model_2, i, train_loader, 'train')
+            # TODO (JON):  I don't know if we want normal train loss, or eval?
+            eval_val_corr, eval_val_loss = evaluate(args, model_2, i, val_loader, 'valid')
+            eval_test_corr, eval_test_loss = evaluate(args, model_2, i, test_loader, 'test')
 
 
 def get_args():
@@ -635,11 +717,11 @@ def get_args():
 
 if __name__ == '__main__':
     torch.manual_seed(0)
-    args = get_args() # Used (badly) to initialize empty args
-    super_execute_argss = setup_overfit_images() # Overwrites global args above
+    args = get_args()  # Used (badly) to initialize empty args
+    super_execute_argss = setup_overfit_images()  # Overwrites global args above
     # TODO (JON): I put different elementary optimizer and inverter
     for execute_args in super_execute_argss:
-        #import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
         print(execute_args)
         experiment(execute_args)
 
