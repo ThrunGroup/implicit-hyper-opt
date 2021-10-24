@@ -21,8 +21,8 @@ def setup_overfit_validation(dataset, model, num_layers):
 
     cur_args = copy.deepcopy(args)
     cur_args.datasize = 100
-    cur_args.valsize = 30
-    cur_args.testsize = -1
+    cur_args.valsize = 50
+    cur_args.testsize = 1000
 
     cur_args.lr = 1e-4
     # cur_args.lrh = 1e-2
@@ -42,10 +42,10 @@ def setup_overfit_validation(dataset, model, num_layers):
 
     cur_args.hessian = 'identity'
     cur_args.hepochs = 50
-    cur_args.epochs = 1000
+    cur_args.epochs = 300
     cur_args.init_epochs = 5
 
-    cur_args.elementary_log_interval = 50
+    cur_args.elementary_log_interval = 100
     cur_args.hyper_log_interval = 50
 
     cur_args.graph_hessian = False
@@ -190,7 +190,7 @@ def test_loss_func(args, model, x, y, network, reduction='elementwise_mean'):
 def prepare_data(args, x, y):
     if args.cuda:
         x, y = x.cuda(), y.cuda()
-    x, y = Variable(x), Variable(y)
+    # x, y = Variable(x), Variable(y)
     return x, y
 
 
@@ -543,7 +543,42 @@ def experiment(args):
     global_step = 0
     _1, _2 = 0, 0
     plot_augmentation(args, val_loader, model.aug_model, 5)
-
+    # model.aug_model.load_state_dict(torch.load('aug_model_best/best5.pt'))
+    # model_1 = Net(args.num_layers, args.dropout, imsize, in_channel, args.l2, num_classes=num_classes).cuda()
+    # model_2 = Net(args.num_layers, args.dropout, imsize, in_channel, args.l2, num_classes=num_classes).cuda()
+    # optimizer_1 = torch.optim.Adam(model_1.parameters(), args.lr)
+    # optimizer_2 = torch.optim.Adam(model_2.parameters(), args.lr)
+    # new_train_loader = augment_train_dataset(args, train_loader, model.aug_model)
+    # step1 = 0
+    # step2 = 0
+    # plot_augmentation(args, test_loader, model.aug_model, 5)
+    # best1_accuracy = .0
+    # best2_accuracy = .0
+    # print('model_1')
+    # for i in range(100):
+    #     step1, train_loss1 = train(args, model_1, train_loader, optimizer_1, val_loss_func, i, step1)
+    #     eval_train_corr, eval_train_loss = evaluate(args, model_1, i, train_loader, 'train')
+    #     # TODO (JON):  I don't know if we want normal train loss, or eval?
+    #     eval_val_corr, eval_val_loss = evaluate(args, model_1, i, val_loader, 'valid')
+    #     eval_test_corr, eval_test_loss = evaluate(args, model_1, i, test_loader, 'test')
+    #
+    #     if eval_val_corr > best1_accuracy:
+    #         best1_accuracy = eval_val_corr
+    #         test1_acc = eval_test_corr
+    # print('model_2')
+    # for i in range(100):
+    #     step2, tran_loss2 = train(args, model_2, new_train_loader, optimizer_2, val_loss_func, i, step2)
+    #     eval_train_corr, eval_train_loss = evaluate(args, model_2, i, train_loader, 'train')
+    #     # TODO (JON):  I don't know if we want normal train loss, or eval?
+    #     eval_val_corr, eval_val_loss = evaluate(args, model_2, i, val_loader, 'valid')
+    #     eval_test_corr, eval_test_loss = evaluate(args, model_2, i, test_loader, 'test')
+    #     if eval_val_corr > best2_accuracy:
+    #         best2_accuracy = eval_val_corr
+    #         test2_acc = eval_test_corr
+    #
+    # print('model1', test1_acc)
+    # print('model2', test2_acc)
+    # return None
     for epoch_h in range(0, args.hepochs + 1):
         print(f"Hyper epoch: {epoch_h}")
         if epoch_h % args.hyper_log_interval == 0:
@@ -574,9 +609,9 @@ def experiment(args):
         #     continue
 
         _1, _2 = hyperoptimize(args, model, train_loader, val_loader, optimizer, hyper_optimizer)
-        aug_model = copy.deepcopy(model.aug_model)
+        aug_model_state_dict = copy.deepcopy(model.aug_model.state_dict())
         model.load_state_dict(model_state_dict)
-        model.aug_model = aug_model
+        model.aug_model.load_state_dict(aug_model_state_dict)
         for epoch in range(1, elementary_epochs + 1):
             global_step, epoch_train_loss = train(args, model, train_loader, optimizer, train_loss_func, epoch,
                                                   global_step)
@@ -587,7 +622,8 @@ def experiment(args):
                 print(f"Breaking on epoch {epoch}. train_loss = {epoch_train_loss}, min_loss = {min_loss}")
                 break
             min_loss = epoch_train_loss
-    torch.save(model.aug_model.state_dict(), 'aug_model_best/best5.pt')
+    torch.save(model.aug_model.state_dict(), 'aug_model_best/best6.pt')
+    model.aug_model.load_state_dict(torch.load('aug_model_best/best6.pt'))
     model_1 = Net(args.num_layers, args.dropout, imsize, in_channel, args.l2, num_classes=num_classes).cuda()
     model_2 = Net(args.num_layers, args.dropout, imsize, in_channel, args.l2, num_classes=num_classes).cuda()
     optimizer_1 = torch.optim.Adam(model_1.parameters(), args.lr)

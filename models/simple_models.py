@@ -216,13 +216,14 @@ class CNN(nn.Module):
             count += p.numel()
         return loss
 
-    def model_parameters(self):  # To prevent aug_model params are included in model params
+    def model_parameters(self): # To prevent aug_model params are included in model params
         if self.aug_model is None:
-            return self.parameters()
+            for param in self.parameters():
+                yield param
         else:
-            for name, params in self.named_parameters():
-                if name not in self.aug_model.named_parameters().keys():
-                    yield params
+            for name, param in self.named_parameters():
+                if name in self.model_params_keys:
+                    yield param
 
 class Net(nn.Module):
     def __init__(self, num_layers, dropout, size, channel, weight_decay, num_classes=10, do_res=False,
