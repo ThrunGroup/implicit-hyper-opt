@@ -71,6 +71,8 @@ class UNet(nn.Module):
             prev_channels = 2 ** (wf + i)
 
         self.last = nn.Conv2d(prev_channels, n_classes, kernel_size=1)
+        # self.linear = torch.nn.Linear(28, 28)
+
 
     def forward(self, x, use_zero_noise=False, class_label=None):
         # if x.size(-1) % (2 ** self.depth) != 0:
@@ -82,7 +84,6 @@ class UNet(nn.Module):
         #     to_pad_bottom = to_pad_right
         #     pad = (to_pad_left, to_pad_right, to_pad_top, to_pad_bottom)
         #     x = F.pad(x, pad=pad)
-
         blocks = []
 
         do_class_generation = False
@@ -106,6 +107,8 @@ class UNet(nn.Module):
 
         for i, up in enumerate(self.up_path):
             out = up(out, blocks[-i - 1])
+
+
 
         if self.use_identity_residual:
             res = self.last(out)

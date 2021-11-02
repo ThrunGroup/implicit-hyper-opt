@@ -27,7 +27,7 @@ parameters_dict = {
     },
     'num_layers': {
         'distribution': 'categorical',
-        'values': [1,2]
+        'values': [1]
     },
     'aug_model': {
         'distribution': 'constant',
@@ -43,12 +43,11 @@ parameters_dict = {
         # randomly select real number x in [min, max] and return exp(x)
         'distribution': 'log_uniform',
         'min': math.log(0.1),
-        'max': math.log(0.15)
+        'max': math.log(0.11)
     },
     'wf': {
-        'distribution': 'int_uniform',
-        'min': 1,
-        'max': 2
+        'distribution': 'constant',
+        'value': 1
     },
     'depth': {
         'distribution': 'constant',
@@ -59,23 +58,20 @@ parameters_dict = {
         'value': True
     },
     'loss_criterion': {
-        'distribution': 'log_uniform',
-        'min': math.log(1e-8),
-        'max': math.log(1e-4)
+        'distribution': 'constant',
+        'value': 0.000004105
     },
     'hessian': {
         'distribution': 'constant',
         'value': 'neumann'
     },
     'num_neumann': {
-        'distribution': 'int_uniform',
-        'min': 3,
-        'max': 4
+        'distribution': 'constant',
+        'value': 3
     },
     'neumann_converge_factor': {
-        'distribution': 'log_uniform',
-        'min': math.log(1e-4),
-        'max': math.log(1e-3)
+        'distribution': 'constant',
+        'value': 0.0009768
     },
     'optimizer': {
         'distribution': 'categorical',
@@ -87,39 +83,39 @@ parameters_dict = {
     },
     'epochs': {
         'distribution': 'int_uniform',
-        'min': 300,
+        'min': 380,
         'max': 400
     },
     'hepochs': {
         'distribution': 'int_uniform',
         'min': 30,
-        'max': 33,
+        'max': 35,
     },
     'model_lr': {
         'distribution': 'log_uniform',
         'min': math.log(1e-4),
-        'max': math.log(1e-1)
+        'max': math.log(5e-4)
     },
     'hyper_model_lr': {
         'distribution': 'log_uniform',
-        'min': math.log(1e-4),
-        'max': math.log(1e-2)
+        'min': math.log(0.01),
+        'max': math.log(0.015)
     },
     'datasize': {
         # round log_uniform
-        'distribution': 'q_log_uniform',
-        'min': math.log(300),
-        'max': math.log(350)
+        'distribution': 'int_uniform',
+        'min': 500,
+        'max': 550
     },
     'batch_size': {
         'distribution': 'q_log_uniform',
         'min': math.log(10),
-        'max': math.log(15)
+        'max': math.log(11)
     },
     'train_prop': {
         'distribution': 'uniform',
-        'min': 0.5,
-        'max': 0.75
+        'min': 0.55,
+        'max': 0.56
     },
     'test_size': {
         'distribution': 'constant',
@@ -128,7 +124,7 @@ parameters_dict = {
     'seed': {
         'distribution': 'int_uniform',
         'min': 1,
-        'max': 100
+        'max': 1000
     },
     'patience': {
         'distribution': 'int_uniform',
@@ -141,4 +137,4 @@ sweep_config['parameters'] = parameters_dict
 if __name__ == '__main__':
     wandb.login()
     sweep_id = wandb.sweep(sweep_config, project="pytorch-sweeps-demo")
-    wandb.agent(sweep_id, experiment, count=5)
+    wandb.agent(sweep_id, experiment, count=10)
