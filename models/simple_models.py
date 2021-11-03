@@ -161,14 +161,14 @@ class CNN(nn.Module):
             )
         else:
             self.features = nn.Sequential(
-                nn.Conv2d(self.in_channel, 20, kernel_size=3, stride=2, padding=1),
+                nn.Conv2d(self.in_channel, 20, kernel_size=3, stride=1, padding=1),
                 nn.ReLU(inplace=True),
                 nn.MaxPool2d(kernel_size=2),
+                nn.Conv2d(20, 40, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=2)
             )
-            if imsize == 32:
-                self.view_size = 20 * 8 * 8
-            elif imsize == 28:
-                self.view_size = 980
+            self.view_size = imsize * imsize * in_channel # More simple definition of view_size
             self.classifier = nn.Sequential(
                 nn.Dropout(),
                 nn.Linear(self.view_size, 250),
