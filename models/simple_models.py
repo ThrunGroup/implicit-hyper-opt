@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
+import math
 
 class GaussianDropout(nn.Module):
     def __init__(self, dropout):
@@ -168,7 +169,9 @@ class CNN(nn.Module):
                 nn.ReLU(inplace=True),
                 nn.MaxPool2d(kernel_size=2)
             )
-            self.view_size = imsize * imsize * in_channel # More simple definition of view_size
+            imsize = math.floor(imsize/2)
+            imsize = math.floor(imsize/2)
+            self.view_size = imsize * imsize * 40 # More simple definition of view_size
             self.classifier = nn.Sequential(
                 nn.Dropout(),
                 nn.Linear(self.view_size, 250),
