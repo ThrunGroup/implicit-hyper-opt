@@ -10,16 +10,16 @@ import math
 
 class UNet(nn.Module):
     def __init__(
-        self,
-        in_channels=1,
-        n_classes=2,
-        depth=5,
-        wf=5,
-        padding=False,
-        batch_norm=False,
-        do_noise_channel=False,
-        use_identity_residual=False,
-        up_mode='upconv'
+            self,
+            in_channels=1,
+            n_classes=2,
+            depth=5,
+            wf=5,
+            padding=False,
+            batch_norm=False,
+            do_noise_channel=False,
+            use_identity_residual=False,
+            up_mode='upconv'
     ):
         """
         Implementation of
@@ -73,7 +73,6 @@ class UNet(nn.Module):
         self.last = nn.Conv2d(prev_channels, n_classes, kernel_size=1)
         # self.linear = torch.nn.Linear(28, 28)
 
-
     def forward(self, x, use_zero_noise=False, class_label=None):
         # if x.size(-1) % (2 ** self.depth) != 0:
         #     remainder = x.size(-1) % (2 ** self.depth)
@@ -91,7 +90,8 @@ class UNet(nn.Module):
             if do_class_generation:
                 x = x * 0 + class_label.float().reshape(-1, 1, 1, 1)
 
-            noise_channel = torch.randn((x.shape[0], 1, x.shape[2], x.shape[3])).cuda()*0 + torch.randn((x.shape[0], 1, 1, 1)).cuda()
+            noise_channel = torch.randn((x.shape[0], 1, x.shape[2], x.shape[3])).cuda() * 0 + torch.randn(
+                (x.shape[0], 1, 1, 1)).cuda()
             if use_zero_noise:
                 noise_channel = noise_channel * 0
 
@@ -107,8 +107,6 @@ class UNet(nn.Module):
 
         for i, up in enumerate(self.up_path):
             out = up(out, blocks[-i - 1])
-
-
 
         if self.use_identity_residual:
             res = self.last(out)
@@ -164,8 +162,8 @@ class UNetUpBlock(nn.Module):
         diff_y = (layer_height - target_size[0]) // 2
         diff_x = (layer_width - target_size[1]) // 2
         return layer[
-            :, :, diff_y : (diff_y + target_size[0]), diff_x : (diff_x + target_size[1])
-        ]
+               :, :, diff_y: (diff_y + target_size[0]), diff_x: (diff_x + target_size[1])
+               ]
 
     def forward(self, x, bridge):
         up = self.up(x)
