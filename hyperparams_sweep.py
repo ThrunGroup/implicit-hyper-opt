@@ -23,11 +23,11 @@ parameters_dict = {
     'model': {
         # uniformly select between two models
         'distribution': 'categorical',
-        'values': ['mlp'] # , 'cnn']
+        'values': ['resnet']
     },
     'num_layers': {
         'distribution': 'categorical',
-        'values': [1]
+        'values': [1, 2]
     },
     'aug_model': {
         'distribution': 'constant',
@@ -47,11 +47,12 @@ parameters_dict = {
     },
     'wf': {
         'distribution': 'constant',
-        'value': 1
+        'value': 5
     },
     'depth': {
-        'distribution': 'constant',
-        'value': 1
+        'distribution': 'int_uniform',
+        'min': 1,
+        'max': 4
     },
     'use_cuda': {
         'distribution': 'constant',
@@ -84,33 +85,33 @@ parameters_dict = {
     'epochs': {
         'distribution': 'int_uniform',
         'min': 380,
-        'max': 400
+        'max': 600
     },
     'hepochs': {
         'distribution': 'int_uniform',
         'min': 30,
-        'max': 35,
+        'max': 100,
     },
     'model_lr': {
         'distribution': 'log_uniform',
         'min': math.log(1e-4),
-        'max': math.log(5e-4)
+        'max': math.log(5e-3)
     },
     'hyper_model_lr': {
         'distribution': 'log_uniform',
-        'min': math.log(0.01),
-        'max': math.log(0.015)
+        'min': math.log(0.0002),
+        'max': math.log(0.01)
     },
     'datasize': {
         # round log_uniform
         'distribution': 'int_uniform',
-        'min': 500,
-        'max': 550
+        'min': 1000,
+        'max': 1050
     },
     'batch_size': {
         'distribution': 'q_log_uniform',
-        'min': math.log(10),
-        'max': math.log(11)
+        'min': math.log(20),
+        'max': math.log(21)
     },
     'train_prop': {
         'distribution': 'uniform',
@@ -118,6 +119,10 @@ parameters_dict = {
         'max': 0.56
     },
     'test_size': {
+        'distribution': 'constant',
+        'value': -1
+    },
+    'val2_size': {
         'distribution': 'constant',
         'value': -1
     },
@@ -137,4 +142,4 @@ sweep_config['parameters'] = parameters_dict
 if __name__ == '__main__':
     wandb.login()
     sweep_id = wandb.sweep(sweep_config, project="pytorch-sweeps-demo")
-    wandb.agent(sweep_id, experiment, count=10)
+    wandb.agent(sweep_id, experiment, count=50)
