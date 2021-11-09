@@ -476,7 +476,7 @@ if __name__ == '__main__':
 
     # To check if experiment(config) runs well
     config = argparse.ArgumentParser(description='PyTorch MNIST Example')
-    config.dataset = 'resnet'
+    config.dataset = 'cifar10'
     config.model = 'resnet'
     config.aug_model = 'unet'
     config.num_layers = 2
