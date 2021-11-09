@@ -12,7 +12,7 @@ import copy
 from typing import Callable
 import torchvision
 import os
-from models.permuation_matrix import Permutation_matrix
+# from models.permuation_matrix import Permutation_matrix
 
 # Local imports
 from data_loaders import DataLoaders
@@ -337,8 +337,8 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
     for i, (x, y) in enumerate(train_loader):
         x, y =prepare_data(use_cuda, x, y)
         val_loader.append([aug_model(x), y])
-    with torch.no_grad():
-        aug_model.perm_matrix += 0.0 * torch.rand(*aug_model.perm_matrix.shape).cuda()
+    # with torch.no_grad():
+        # aug_model.perm_matrix += 0.0 * torch.rand(*aug_model.perm_matrix.shape).cuda()
     plot_augmentation(use_cuda, val_loader, aug_model, 10)
 
     ###############################################################################
@@ -381,7 +381,7 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
         if epoch_h % 1 == 0:
             plot_augmentation(config.use_cuda, test_loader, aug_model, n=10)
 
-        if epoch_h != 1:
+        if epoch_h != 0:
             # for idx, (x, y) in enumerate(train_loader):
             #     new_train_loader = [(x, y)]
             _1, _2 = hyperoptimize(config.use_cuda, model, aug_model, train_loader, val_loader, optimizer,
@@ -490,9 +490,9 @@ if __name__ == '__main__':
 
     # To check if experiment(config) runs well
     config = argparse.ArgumentParser(description='PyTorch MNIST Example')
-    config.dataset = 'mnist'
-    config.model = 'cnn'
-    config.aug_model = 'perm' # perm, unet
+    config.dataset = 'cifar10'
+    config.model = 'resnet'
+    config.aug_model = 'unet' # perm, unet
     config.num_layers = 2 # Is used when model == 'mlp'
     config.dropout = 0.1
     config.fc_shape = 800 # Is used when model == 'mlp'
@@ -510,7 +510,7 @@ if __name__ == '__main__':
     config.model_lr = 0.0002894
     config.hyper_model_lr = 0.0001
     config.batch_size = 32
-    config.datasize = 500
+    config.datasize = 2000
     config.train_prop = 0.55
     config.test_size = -1
     config.patience = 20
@@ -518,4 +518,4 @@ if __name__ == '__main__':
     config.val2_size = -1
     for i in range(15, 20):
         config.seed = i
-        experiment(config, use_wandb=False, use_sweep=False)
+        experiment(config, use_wandb=True, use_sweep=False)
