@@ -351,8 +351,8 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
     ###############################################################################
     # Load the previous learned model (to reduce runtime)
     ###############################################################################
-    prev_model_best_path = 'model_best/' + 'seed' + str(config.seed) + 'model_' + str(
-        config.model) + 'model_prev_best.pt'
+    prev_model_best_path = f'seed-{config.seed}_model-{config.model}_dataset-{config.dataset}_best/' \
+                           + 'model_prev_best.pt'
     if os.path.exists(prev_model_best_path):
         model.load_state_dict(torch.load(prev_model_best_path))
 
@@ -496,7 +496,7 @@ if __name__ == '__main__':
     config.model_lr = 0.0001894
     config.hyper_model_lr = 0.001
     config.batch_size = 64
-    config.datasize = 500
+    config.datasize = 1000
     config.train_prop = 0.55
     config.test_size = -1
     config.patience = 20
