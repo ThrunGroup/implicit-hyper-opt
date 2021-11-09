@@ -351,10 +351,11 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
     ###############################################################################
     # Load the previous learned model (to reduce runtime)
     ###############################################################################
-    prev_model_best_path = f'seed-{config.seed}_model-{config.model}_dataset-{config.dataset}_best/' \
-                           + 'model_prev_best.pt'
-    if os.path.exists(prev_model_best_path):
-        model.load_state_dict(torch.load(prev_model_best_path))
+    log_path = f'seed-{config.seed}_model-{config.model}_dataset-{config.dataset}_best'
+    if os.path.exists(log_path + "\prev_model_best.pt"):
+        model.load_state_dict(log_path + "\prev_model_best.pt")
+    else:
+        os.makedirs(log_path)
 
     ###############################################################################
     # Perform the training
@@ -362,7 +363,7 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
     patience = 0
     best_val2_loss = float("inf")
     print("#" * 10 + "\n", f'seed: {config.seed}, model: {config.model}, datasize: {config.datasize}, dataset: ',
-                           f'{config.dataset}\n', "#" * 10 + "\n")
+          f'{config.dataset}\n', "#" * 10 + "\n")
     for epoch_h in range(1, config.hepochs + 1):
         if epoch_h % 10 == 0:
             plot_augmentation(config.use_cuda, test_loader, aug_model, n=10)
@@ -393,7 +394,7 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
                 break
         del loss
         if epoch_h == 1:
-            torch.save(model.state_dict(), prev_model_best_path)
+            torch.save(model.state_dict(), log_path + "\prev_model_best.pt")
 
         val_loss, val_acc = evaluate(config.use_cuda, model, val_loader)
         print("hyper_epoch", epoch_h, "val_loss", val_loss, "val_acc", val_acc)
@@ -409,8 +410,8 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
         if val2_loss < best_val2_loss:
             best_val2_loss = val2_loss
             best_aug_model_state_dict = copy.deepcopy(aug_model.state_dict())
-            torch.save(aug_model.state_dict(), 'model_best/' + str(config.seed) + 'aug_model_best.pt')
-            torch.save(model.state_dict(), 'model_best/' + str(config.seed) + 'model_best.pt')
+            torch.save(aug_model.state_dict(), log_path + "/" + "aug_model_best.pt")
+            torch.save(model.state_dict(), log_path + '/model_best.pt')
             patience = 0
         else:
             patience += 1
@@ -476,8 +477,8 @@ if __name__ == '__main__':
 
     # To check if experiment(config) runs well
     config = argparse.ArgumentParser(description='PyTorch MNIST Example')
-    config.dataset = 'cifar10'
-    config.model = 'resnet'
+    config.dataset = 'mnist'
+    config.model = 'cnn'
     config.aug_model = 'unet'
     config.num_layers = 2
     config.dropout = 0.1
@@ -495,8 +496,8 @@ if __name__ == '__main__':
     config.hepochs = 300
     config.model_lr = 0.0001894
     config.hyper_model_lr = 0.001
-    config.batch_size = 64
-    config.datasize = 1000
+    config.batch_size = 32
+    config.datasize = 500
     config.train_prop = 0.55
     config.test_size = -1
     config.patience = 20
