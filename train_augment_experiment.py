@@ -10,11 +10,14 @@ from torch.autograd import grad
 from torch.autograd import Variable
 import copy
 from typing import Callable
+import torchvision
+import os
 
 # Local imports
 from data_loaders import DataLoaders
 from models.simple_models import CNN, Net, GaussianDropout
 from models.unet import UNet
+from models.resnet import ResNet18
 from utils.util import eval_hessian, eval_jacobian, gather_flat_grad, conjugate_gradiant
 
 
@@ -40,7 +43,7 @@ def aug_and_unaug_loss_func(x, y, model, aug_model=None, reduction='elementwise_
     assert aug_model
     loss1, predicted_y1 = augmented_loss_func(x, y, model, aug_model, reduction=reduction)
     loss2, predicted_y2 = unaugmented_loss_func(x, y, model, aug_model, reduction=reduction)
-    loss = (loss1 + loss2)
+    loss = (loss1 + loss2) / 2.0
     predicted_y = torch.cat([predicted_y1, predicted_y2])
     return loss, predicted_y
 
@@ -90,7 +93,7 @@ def hyperoptimize(use_cuda, model, aug_model, train_loader, val_loader, optimize
     dLv_dw = torch.zeros(num_weights)
     if use_cuda:
         dLv_dw = dLv_dw.cuda()
-    model.train()
+    model.eval()
     for batch_idx, (x, y) in enumerate(val_loader):
         optimizer.zero_grad()
         x, y = prepare_data(use_cuda, x, y)
@@ -117,6 +120,9 @@ def hyperoptimize(use_cuda, model, aug_model, train_loader, val_loader, optimize
             flat_dLt_dw.backward(flat_pre_conditioner)  # hyperparams.grad = flat_pre_conditioner * d(dLt/dw)/ dlambda
 
     elif hessian == 'neumann':
+        pre_conditioner = dLv_dw.detach()  # dLv_dw is already a flat tensor
+        counter = pre_conditioner
+
         flat_dLt_dw = torch.zeros(num_weights).cuda()
         model.train(), aug_model.train()
         for batch_idx, (x, y) in enumerate(train_loader):
@@ -126,47 +132,38 @@ def hyperoptimize(use_cuda, model, aug_model, train_loader, val_loader, optimize
             optimizer.zero_grad()
             hyper_optimizer.zero_grad()
             dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
-            flat_dLt_dw += gather_flat_grad(dLt_dw)
-        flat_dLt_dw /= (batch_idx + 1)
-
-        pre_conditioner = dLv_dw.detach()  # dLv_dw is already a flat tensor
-        counter = pre_conditioner
-        i = 0
-        while i < num_neumann:
-            old_counter = counter
-            hessian_term = gather_flat_grad(
-                grad(flat_dLt_dw, model.parameters(), grad_outputs=counter.view(-1), retain_graph=True))
-            counter = old_counter - neumann_converge_factor * hessian_term
-            pre_conditioner += counter
-            i += 1
-        pre_conditioner *= neumann_converge_factor
+            flat_batch_dLt_dw = gather_flat_grad(dLt_dw)
+            counter = pre_conditioner
+            i = 0
+            while i < num_neumann:  # Jay: Calculate Neumann series in each bach idx to reduce memory usage
+                old_counter = counter
+                hessian_term = gather_flat_grad(
+                    grad(flat_batch_dLt_dw, model.parameters(), grad_outputs=counter.view(-1), retain_graph=True))
+                counter = old_counter - neumann_converge_factor * hessian_term
+                pre_conditioner += counter
+                i += 1
+        pre_conditioner *= neumann_converge_factor / (batch_idx + 1)
 
         model.train(), aug_model.train()  # train()
-
         for batch_idx, (x, y) in enumerate(train_loader):
             x, y = prepare_data(use_cuda, x, y)
             train_loss, _ = augmented_loss_func(x, y, model, aug_model)
             # TODO (JON): Probably don't recompute - use create_graph and retain_graph?
-            # for name, param in model.named_parameters():
-            #     print("model----------", name, param.grad)
-            #     break
-            # for name, param in aug_model.named_parameters():
-            #     print("----------", name, param.grad)
-            #     break
-
             optimizer.zero_grad()  # , hyper_optimizer.zero_grad()
             dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
             flat_dLt_dw = gather_flat_grad(dLt_dw)
             optimizer.zero_grad()
             flat_dLt_dw.backward(pre_conditioner)
-    for hyper_params in aug_model.parameters():
+
+    for hyper_params in aug_model.parameters():  # hyper_params.grad = dLv_dlambda = dLv_dw * dw_dlambda and dw_dlambda
+        # = - hessian * d^2Lt_dw*dlambda
         hyper_params.grad /= -(batch_idx + 1)
 
     flatten_hyper_params = gather_flat_grad(aug_model.parameters())
     flatten_hyper_grads = torch.cat([p.grad.view(-1) for p in aug_model.parameters()])
 
     print("weight={}, update={}".format(flatten_hyper_params.norm(), flatten_hyper_grads.norm()))
-    torch.nn.utils.clip_grad_norm_(aug_model.parameters(), 0.1)
+    torch.nn.utils.clip_grad_norm_(aug_model.parameters(), 1)
     hyper_optimizer.step()  # TODO (@Mo): Understand hyper_optimizer.step(), get_hyper_train(), kfac_opt.fake_step()?
     optimizer.zero_grad()
     hyper_optimizer.zero_grad()
@@ -191,32 +188,24 @@ def set_seed(seed: int):
         torch.cuda.manual_seed(seed)
     random.seed(seed)
 
+
 def train_identity_augment(use_cuda, aug_model: torch.nn.Module, loader: torch.utils.data.DataLoader,
                            num_epochs=int):
-    import torchvision
-    a = torchvision.transforms.RandomHorizontalFlip(p=1)
-    b = torchvision.transforms.ToPILImage()
-    c = torchvision.transforms.ToTensor()
-    d = torchvision.transforms.Compose(
-        [b,a,c]
-    )
     aug_model_optimizer = torch.optim.Adam(aug_model.parameters())
     aug_model.train()
-    for i in range(60):
+    for i in range(num_epochs):
         total_loss = .0
         for idx, (x, y) in enumerate(loader):
             x, y = prepare_data(use_cuda, x, y)
-            for j in range(x.size(0)):
-                aug_model_optimizer.zero_grad()
-                loss = F.mse_loss(aug_model(x)[j], d(x[j].cpu()).cuda())
-                loss.backward()
-                aug_model_optimizer.step()
-                total_loss += loss
-        if i % 10 == 0:
-            print(total_loss)
-        if total_loss < 1e-4:
-            print(total_loss)
+            aug_model_optimizer.zero_grad()
+            loss = F.mse_loss(aug_model(x), x)
+            loss.backward()
+            aug_model_optimizer.step()
+            total_loss += loss
+        if total_loss < 1e-5:
             break
+
+
 def plot_augmentation(use_cuda, loader: torch.utils.data.DataLoader, aug_model: torch.nn.Module = None, n=10):
     if not aug_model:
         return None
@@ -244,7 +233,7 @@ def plot_augmentation(use_cuda, loader: torch.utils.data.DataLoader, aug_model: 
                     return None  # ends ploting
 
 
-def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool=True):
+def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = True):
     """
 
     :param config contains dataset, model, aug_model, num_layers, dropout, fc_shape, wf, depth, use_cuda, loss_criterion
@@ -268,13 +257,14 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool=True
     train_size = int(config.datasize * config.train_prop)
     val_size = config.datasize - train_size
     batch_size = min(config.batch_size, config.datasize)
-    train_loader, val_loader, test_loader = DataLoaders.get_data_loaders(dataset=config.dataset,
-                                                                         batch_size=batch_size,
-                                                                         train_size=train_size,
-                                                                         val_size=val_size,
-                                                                         test_size=config.test_size,
-                                                                         num_train=config.datasize,
-                                                                         data_augment=True)
+    train_loader, val_loader, val2_loader, test_loader = DataLoaders.get_data_loaders(dataset=config.dataset,
+                                                                                      batch_size=batch_size,
+                                                                                      train_size=train_size,
+                                                                                      val_size=val_size,
+                                                                                      val2_size=config.val2_size,
+                                                                                      test_size=config.test_size,
+                                                                                      num_train=config.datasize,
+                                                                                      data_augment=True)
     if config.dataset == 'mnist':
         in_channel = 1
         imsize = 28
@@ -319,11 +309,16 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool=True
                                 do_alexnet=True, num_classes=num_classes)
         augmented_model = CNN(config.num_layers, config.dropout, config.fc_shape, 0, in_channel, imsize,
                               do_alexnet=True, num_classes=num_classes)
+    elif config.model == "resnet":
+        model = ResNet18(num_classes=num_classes)
+        unaugmented_model = ResNet18(num_classes=num_classes)
+        augmented_model = ResNet18(num_classes=num_classes)
     else:
         raise Exception("bad model")
 
     if config.aug_model == "unet":
-        aug_model = UNet(in_channels=in_channel, n_classes=in_channel, wf=config.wf, padding=1, depth=config.depth)
+        aug_model = UNet(in_channels=in_channel, n_classes=in_channel, wf=config.wf, padding=1, depth=config.depth,
+                         do_noise_channel=True, use_identity_residual=True)
     else:
         raise Exception("bad augmentation model")
 
@@ -341,40 +336,81 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool=True
     hyper_optimizer = get_optimizer(config.hyper_optimizer)(aug_model.parameters(), config.hyper_model_lr)
 
     ###############################################################################
+    # Log the initial augmentation map
+    ###############################################################################
+    images, classes = next(iter(train_loader))
+    if use_cuda:
+        images = images.cuda()
+    plot_augmentation(use_cuda, train_loader, aug_model, 10)
+    augmented_images = aug_model(images)
+    before_after_images = torch.cat([images, augmented_images])
+    images_array = torchvision.utils.make_grid(before_after_images)
+    if use_wandb:
+        img = wandb.Image(images_array, caption="Top: before augmenting/ Bottom: after augmenting")
+        wandb.log({"seed" + str(config.seed) + "_augmented_images": img})
+    ###############################################################################
+    # Load the previous learned model (to reduce runtime)
+    ###############################################################################
+    prev_model_best_path = 'model_best/' + 'seed' + str(config.seed) + 'model_' + str(
+        config.model) + 'model_prev_best.pt'
+    if os.path.exists(prev_model_best_path):
+        model.load_state_dict(torch.load(prev_model_best_path))
+
+    ###############################################################################
     # Perform the training
     ###############################################################################
     patience = 0
-    best_val_loss = float("inf")
-    # train_identity_augment(use_cuda, aug_model, train_loader, 300)
+    best_val2_loss = float("inf")
+    print("#" * 10 + "\n", f'seed: {config.seed}, model: {config.model}, datasize: {config.datasize}, dataset: ',
+                           f'{config.dataset}\n', "#" * 10 + "\n")
     for epoch_h in range(1, config.hepochs + 1):
-        # plot_augmentation(config.use_cuda, test_loader, aug_model, n=10)
+        if epoch_h % 10 == 0:
+            plot_augmentation(config.use_cuda, test_loader, aug_model, n=10)
 
         if epoch_h != 1:
             # for idx, (x, y) in enumerate(train_loader):
             #     new_train_loader = [(x, y)]
             _1, _2 = hyperoptimize(config.use_cuda, model, aug_model, train_loader, val_loader, optimizer,
-                       hyper_optimizer, config.hessian, config.neumann_converge_factor,
-                       config.num_neumann)
-        model.load_state_dict(model_state_dict)  # @Jay: Initialize model for every hyper epochs -- needs to be
+                                   hyper_optimizer, config.hessian, config.neumann_converge_factor,
+                                   config.num_neumann)
+        # model.load_state_dict(model_state_dict)  # @Jay: Initialize model for every hyper epochs -- needs to be
         # discussed
+        best_child_loss = float('inf')
         for epoch in range(1, config.epochs + 1):
             loss = train(config.use_cuda, model, train_loader, optimizer, augmented_loss_func, aug_model)
-            if loss < config.loss_criterion:
-                break
             if epoch % 100 == 0 or epoch == 1:
                 print('step', epoch, ': ', loss)
 
+            # Early stopping
+            if loss < best_child_loss:
+                child_patience = 0
+                best_child_loss = loss
+            else:
+                child_patience += 1
+            if child_patience > config.patience * 5:
+                break
+            elif loss < config.loss_criterion:
+                break
+        del loss
+        if epoch_h == 1:
+            torch.save(model.state_dict(), prev_model_best_path)
+
         val_loss, val_acc = evaluate(config.use_cuda, model, val_loader)
         print("hyper_epoch", epoch_h, "val_loss", val_loss, "val_acc", val_acc)
+        val2_loss, val2_acc = evaluate(config.use_cuda, model, val2_loader)
+        print("hyper_epoch", epoch_h, "val2_loss", val2_loss, "test_acc", val2_acc)
 
         # log the results
         if use_wandb:
             wandb.log({"hyper_epoch": epoch_h, "val_loss": val_loss, "val_acc": val_acc})
+            wandb.log({"hyper_epoch": epoch_h, "val2_loss": val2_loss, "val2_acc": val2_acc})
 
         # Early stopping
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if val2_loss < best_val2_loss:
+            best_val2_loss = val2_loss
             best_aug_model_state_dict = copy.deepcopy(aug_model.state_dict())
+            torch.save(aug_model.state_dict(), 'model_best/' + str(config.seed) + 'aug_model_best.pt')
+            torch.save(model.state_dict(), 'model_best/' + str(config.seed) + 'model_best.pt')
             patience = 0
         else:
             patience += 1
@@ -397,7 +433,7 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool=True
     aug_best_acc = .0
     unaug_best_loss = +float('inf')
     aug_best_loss = +float('inf')
-    for step in range(1, 300 + config.epochs + 1):
+    for step in range(1, 200 + config.epochs + 1):
         # train model with training dataset
         unaug_loss = train(config.use_cuda, unaugmented_model, train_loader, unaug_optimizer, unaugmented_loss_func,
                            aug_model=None)
@@ -409,16 +445,16 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool=True
         unaug_loss, unaug_acc = evaluate(config.use_cuda, unaugmented_model, val_loader)
         aug_loss, aug_acc = evaluate(config.use_cuda, augmented_model, val_loader)
 
-        if unaug_loss > unaug_best_loss:
+        if unaug_loss < unaug_best_loss:
             unaug_best_acc = unaug_acc
-            unaug_best_loss = unaug_best_loss
-            print("step: ", step," unaug_acc:", unaug_acc, "/unaug_best_loss:", aug_best_loss)
+            unaug_best_loss = unaug_loss
+            # print("step: ", step, " unaug_acc:", unaug_acc, "/unaug_best_loss:", unaug_best_loss)
             best_unaugmented_model = unaugmented_model.state_dict()
             # _, unaug_test_acc = evaluate(use_cuda, unaugmented_model, test_loader)
         if aug_loss < aug_best_loss:
             aug_best_acc = aug_acc
-            aug_best_loss = aug_best_loss
-            print("step: ", step," aug_acc:", aug_acc)
+            aug_best_loss = aug_loss
+            # print("step: ", step, " aug_acc:", aug_acc, "/aug_best_loss:", aug_best_loss)
             best_augmented_model = augmented_model.state_dict()
             # _, aug_test_acc = evaluate(use_cuda, augmented_model, test_loader)
     unaugmented_model.load_state_dict(best_unaugmented_model)
@@ -440,31 +476,32 @@ if __name__ == '__main__':
 
     # To check if experiment(config) runs well
     config = argparse.ArgumentParser(description='PyTorch MNIST Example')
-    config.dataset = 'mnist'
-    config.model = 'mlp'
+    config.dataset = 'resnet'
+    config.model = 'resnet'
     config.aug_model = 'unet'
-    config.num_layers = 1
+    config.num_layers = 2
     config.dropout = 0.1
     config.fc_shape = 753
-    config.wf = 1
-    config.depth = 1
+    config.wf = 5
+    config.depth = 3
     config.use_cuda = True
     config.loss_criterion = 0.000004105
     config.hessian = 'neumann'
     config.neumann_converge_factor = 0.0009768
-    config.num_neumann = 3
+    config.num_neumann = 10
     config.optimizer = 'adam'
     config.hyper_optimizer = 'rmsprop'
-    config.epochs = 382
-    config.hepochs = 31
+    config.epochs = 800
+    config.hepochs = 300
     config.model_lr = 0.0001894
-    config.hyper_model_lr = 0.01612
-    config.batch_size = 11
+    config.hyper_model_lr = 0.001
+    config.batch_size = 64
     config.datasize = 500
     config.train_prop = 0.55
     config.test_size = -1
-    config.patience = 9
+    config.patience = 20
     config.seed = 99
-    for i in range(95, 100):
+    config.val2_size = -1
+    for i in range(5, 10):
         config.seed = i
-        experiment(config, use_wandb=False, use_sweep=False)
+        experiment(config, use_wandb=True, use_sweep=False)
