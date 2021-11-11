@@ -120,9 +120,6 @@ def hyperoptimize(use_cuda, model, aug_model, train_loader, val_loader, optimize
             flat_dLt_dw.backward(flat_pre_conditioner)  # hyperparams.grad = flat_pre_conditioner * d(dLt/dw)/ dlambda
 
     elif hessian == 'neumann':
-        pre_conditioner = dLv_dw.detach()  # dLv_dw is already a flat tensor
-        counter = pre_conditioner
-
         flat_dLt_dw = torch.zeros(num_weights).cuda()
         model.train(), aug_model.train()
         for batch_idx, (x, y) in enumerate(train_loader):
@@ -132,16 +129,18 @@ def hyperoptimize(use_cuda, model, aug_model, train_loader, val_loader, optimize
             optimizer.zero_grad()
             hyper_optimizer.zero_grad()
             dLt_dw = grad(train_loss, model.parameters(), create_graph=True)
-            flat_batch_dLt_dw = gather_flat_grad(dLt_dw)
-            counter = pre_conditioner
-            i = 0
-            while i < num_neumann:  # Jay: Calculate Neumann series in each bach idx to reduce memory usage
-                old_counter = counter
-                hessian_term = gather_flat_grad(
-                    grad(flat_batch_dLt_dw, model.parameters(), grad_outputs=counter.view(-1), retain_graph=True))
-                counter = old_counter - neumann_converge_factor * hessian_term
-                pre_conditioner += counter
-                i += 1
+            flat_dLt_dw += gather_flat_grad(dLt_dw)
+
+        pre_conditioner = dLv_dw.detach()  # dLv_dw is already a flat tensor
+        counter = pre_conditioner
+        i = 0
+        while i < num_neumann:  # Jay: Calculate Neumann series in each bach idx to reduce memory usage
+            old_counter = counter
+            hessian_term = gather_flat_grad(
+                grad(flat_dLt_dw, model.parameters(), grad_outputs=counter.view(-1), retain_graph=True))
+            counter = old_counter - neumann_converge_factor * hessian_term
+            pre_conditioner += counter
+            i += 1
         pre_conditioner *= neumann_converge_factor / (batch_idx + 1)
 
         model.train(), aug_model.train()  # train()
@@ -318,7 +317,7 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
 
     if config.aug_model == "unet":
         aug_model = UNet(in_channels=in_channel, n_classes=in_channel, wf=config.wf, padding=1, depth=config.depth,
-                         do_noise_channel=True, use_identity_residual=True)
+                         do_noise_channel=True, use_identity_residual=True, batch_norm=True)
     else:
         raise Exception("bad augmentation model")
 
@@ -353,7 +352,7 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
     ###############################################################################
     log_path = f'seed-{config.seed}_model-{config.model}_dataset-{config.dataset}_best'
     if os.path.exists(log_path + "\prev_model_best.pt"):
-        model.load_state_dict(log_path + "\prev_model_best.pt")
+        model.load_state_dict(torch.load(log_path + "\prev_model_best.pt"))
     else:
         os.makedirs(log_path)
 
@@ -477,19 +476,19 @@ if __name__ == '__main__':
 
     # To check if experiment(config) runs well
     config = argparse.ArgumentParser(description='PyTorch MNIST Example')
-    config.dataset = 'mnist'
-    config.model = 'cnn'
+    config.dataset = 'cifar10'
+    config.model = 'alexnet'
     config.aug_model = 'unet'
-    config.num_layers = 2
+    config.num_layers = 2 # Is used when model == 'mlp'
     config.dropout = 0.1
-    config.fc_shape = 753
+    config.fc_shape = 800 # Is used when model == 'mlp'
     config.wf = 5
     config.depth = 3
     config.use_cuda = True
     config.loss_criterion = 0.000004105
     config.hessian = 'neumann'
     config.neumann_converge_factor = 0.0009768
-    config.num_neumann = 10
+    config.num_neumann = 5
     config.optimizer = 'adam'
     config.hyper_optimizer = 'rmsprop'
     config.epochs = 800
@@ -497,12 +496,12 @@ if __name__ == '__main__':
     config.model_lr = 0.0001894
     config.hyper_model_lr = 0.001
     config.batch_size = 32
-    config.datasize = 500
+    config.datasize = 2000
     config.train_prop = 0.55
     config.test_size = -1
     config.patience = 20
     config.seed = 99
     config.val2_size = -1
-    for i in range(5, 10):
+    for i in range(15, 20):
         config.seed = i
         experiment(config, use_wandb=True, use_sweep=False)
