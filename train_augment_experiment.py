@@ -12,6 +12,7 @@ import copy
 from typing import Callable
 import torchvision
 import os
+from models.permuation_matrix import Permutation_matrix
 
 # Local imports
 from data_loaders import DataLoaders
@@ -158,11 +159,13 @@ def hyperoptimize(use_cuda, model, aug_model, train_loader, val_loader, optimize
         # = - hessian * d^2Lt_dw*dlambda
         hyper_params.grad /= -(batch_idx + 1)
 
+    # torch.nn.utils.clip_grad_norm_(aug_model.parameters(), 1)
     flatten_hyper_params = gather_flat_grad(aug_model.parameters())
     flatten_hyper_grads = torch.cat([p.grad.view(-1) for p in aug_model.parameters()])
 
+    print(flatten_hyper_grads)
+    print(flatten_hyper_grads)
     print("weight={}, update={}".format(flatten_hyper_params.norm(), flatten_hyper_grads.norm()))
-    torch.nn.utils.clip_grad_norm_(aug_model.parameters(), 1)
     hyper_optimizer.step()  # TODO (@Mo): Understand hyper_optimizer.step(), get_hyper_train(), kfac_opt.fake_step()?
     optimizer.zero_grad()
     hyper_optimizer.zero_grad()
@@ -318,6 +321,8 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
     if config.aug_model == "unet":
         aug_model = UNet(in_channels=in_channel, n_classes=in_channel, wf=config.wf, padding=1, depth=config.depth,
                          do_noise_channel=True, use_identity_residual=True, batch_norm=True)
+    elif config.aug_model == "perm":
+        aug_model = Permutation_matrix(imsize, noise=.0)
     else:
         raise Exception("bad augmentation model")
 
@@ -327,6 +332,14 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
         aug_model = aug_model.cuda()
     model_state_dict = copy.deepcopy(model.state_dict())
     best_aug_model_state_dict = copy.deepcopy(aug_model.state_dict())
+    val_loader = []
+    transform = torchvision.transforms.RandomRotation(90)
+    for i, (x, y) in enumerate(train_loader):
+        x, y =prepare_data(use_cuda, x, y)
+        val_loader.append([aug_model(x), y])
+    with torch.no_grad():
+        aug_model.perm_matrix += 0.0 * torch.rand(*aug_model.perm_matrix.shape).cuda()
+    plot_augmentation(use_cuda, val_loader, aug_model, 10)
 
     ###############################################################################
     # Setup optimizer and hyper_optimizer
@@ -351,8 +364,9 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
     # Load the previous learned model (to reduce runtime)
     ###############################################################################
     log_path = f'seed-{config.seed}_model-{config.model}_dataset-{config.dataset}_best'
-    if os.path.exists(log_path + "\prev_model_best.pt"):
-        model.load_state_dict(torch.load(log_path + "\prev_model_best.pt"))
+    if os.path.exists(log_path):
+        if os.path.exists(log_path + "\prev_model_best.pt"):
+            model.load_state_dict(torch.load(log_path + "\prev_model_best.pt"))
     else:
         os.makedirs(log_path)
 
@@ -364,7 +378,7 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
     print("#" * 10 + "\n", f'seed: {config.seed}, model: {config.model}, datasize: {config.datasize}, dataset: ',
           f'{config.dataset}\n', "#" * 10 + "\n")
     for epoch_h in range(1, config.hepochs + 1):
-        if epoch_h % 10 == 0:
+        if epoch_h % 1 == 0:
             plot_augmentation(config.use_cuda, test_loader, aug_model, n=10)
 
         if epoch_h != 1:
@@ -476,9 +490,9 @@ if __name__ == '__main__':
 
     # To check if experiment(config) runs well
     config = argparse.ArgumentParser(description='PyTorch MNIST Example')
-    config.dataset = 'cifar10'
-    config.model = 'alexnet'
-    config.aug_model = 'unet'
+    config.dataset = 'mnist'
+    config.model = 'cnn'
+    config.aug_model = 'perm' # perm, unet
     config.num_layers = 2 # Is used when model == 'mlp'
     config.dropout = 0.1
     config.fc_shape = 800 # Is used when model == 'mlp'
@@ -493,10 +507,10 @@ if __name__ == '__main__':
     config.hyper_optimizer = 'rmsprop'
     config.epochs = 800
     config.hepochs = 300
-    config.model_lr = 0.0001894
-    config.hyper_model_lr = 0.001
+    config.model_lr = 0.0002894
+    config.hyper_model_lr = 0.0001
     config.batch_size = 32
-    config.datasize = 2000
+    config.datasize = 500
     config.train_prop = 0.55
     config.test_size = -1
     config.patience = 20
@@ -504,4 +518,4 @@ if __name__ == '__main__':
     config.val2_size = -1
     for i in range(15, 20):
         config.seed = i
-        experiment(config, use_wandb=True, use_sweep=False)
+        experiment(config, use_wandb=False, use_sweep=False)
