@@ -321,8 +321,6 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
     if config.aug_model == "unet":
         aug_model = UNet(in_channels=in_channel, n_classes=in_channel, wf=config.wf, padding=1, depth=config.depth,
                          do_noise_channel=True, use_identity_residual=True, batch_norm=True)
-    elif config.aug_model == "perm":
-        aug_model = Permutation_matrix(imsize, noise=.0)
     else:
         raise Exception("bad augmentation model")
 
@@ -332,14 +330,6 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
         aug_model = aug_model.cuda()
     model_state_dict = copy.deepcopy(model.state_dict())
     best_aug_model_state_dict = copy.deepcopy(aug_model.state_dict())
-    val_loader = []
-    transform = torchvision.transforms.RandomRotation(90)
-    for i, (x, y) in enumerate(train_loader):
-        x, y =prepare_data(use_cuda, x, y)
-        val_loader.append([aug_model(x), y])
-    # with torch.no_grad():
-        # aug_model.perm_matrix += 0.0 * torch.rand(*aug_model.perm_matrix.shape).cuda()
-    plot_augmentation(use_cuda, val_loader, aug_model, 10)
 
     ###############################################################################
     # Setup optimizer and hyper_optimizer
@@ -405,8 +395,7 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
                 break
             elif loss < config.loss_criterion:
                 break
-        del loss
-        if epoch_h == 1:
+        if epoch_h == 1: # To reduce initial training time in further experiment
             torch.save(model.state_dict(), log_path + "\prev_model_best.pt")
 
         val_loss, val_acc = evaluate(config.use_cuda, model, val_loader)
@@ -443,8 +432,6 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
     unaug_optimizer = get_optimizer(config.optimizer)(unaugmented_model.parameters(), config.model_lr)
     aug_optimizer = get_optimizer(config.optimizer)(augmented_model.parameters(), config.model_lr)
 
-    unaug_best_acc = .0
-    aug_best_acc = .0
     unaug_best_loss = +float('inf')
     aug_best_loss = +float('inf')
     for step in range(1, 200 + config.epochs + 1):
@@ -460,17 +447,11 @@ def experiment(config: dict = None, use_wandb: bool = True, use_sweep: bool = Tr
         aug_loss, aug_acc = evaluate(config.use_cuda, augmented_model, val_loader)
 
         if unaug_loss < unaug_best_loss:
-            unaug_best_acc = unaug_acc
             unaug_best_loss = unaug_loss
-            # print("step: ", step, " unaug_acc:", unaug_acc, "/unaug_best_loss:", unaug_best_loss)
             best_unaugmented_model = unaugmented_model.state_dict()
-            # _, unaug_test_acc = evaluate(use_cuda, unaugmented_model, test_loader)
         if aug_loss < aug_best_loss:
-            aug_best_acc = aug_acc
             aug_best_loss = aug_loss
-            # print("step: ", step, " aug_acc:", aug_acc, "/aug_best_loss:", aug_best_loss)
             best_augmented_model = augmented_model.state_dict()
-            # _, aug_test_acc = evaluate(use_cuda, augmented_model, test_loader)
     unaugmented_model.load_state_dict(best_unaugmented_model)
     augmented_model.load_state_dict(best_augmented_model)
     _, unaug_test_acc = evaluate(use_cuda, unaugmented_model, test_loader)
